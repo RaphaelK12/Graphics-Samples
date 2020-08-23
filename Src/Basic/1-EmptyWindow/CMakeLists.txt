@@ -36,6 +36,9 @@ add_executable(EmptyWindow ${all_files})
 
 target_link_libraries( EmptyWindow "d3d12.lib" "dxgi.lib" "dxguid.lib" )
 
-# Setup correct output name for different configurations
+# setup correct output name for different configurations
 set_target_properties( EmptyWindow PROPERTIES RELEASE_OUTPUT_NAME "1_empty_window_r" )
 set_target_properties( EmptyWindow PROPERTIES DEBUG_OUTPUT_NAME "1_empty_window_d" )
+
+# setup project folder
+set_target_properties (EmptyWindow PROPERTIES FOLDER BasicSamples)

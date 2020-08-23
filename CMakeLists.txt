@@ -72,6 +72,9 @@ endmacro(source_group_by_dir)
 # a helper macro to keep track of the root dir
 set(PROJECT_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
+# enable groupping projects in folders
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 # Graphics samples project
 project (GraphicsSamples)
 

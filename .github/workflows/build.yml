@@ -1,0 +1,19 @@
+name: Build Graphics-Samples
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  Windows:
+    runs-on: windows-latest
+    steps:
+    - name: Checking Out Source Code
+      uses: actions/checkout@v2
+    - name: Build Release
+      run: make release
+      shell: cmd
+    - name: Build Debug
+      run: make debug
+      shell: cmd
