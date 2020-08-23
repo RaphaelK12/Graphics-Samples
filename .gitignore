@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+
+# Project folder
+Temp
+
+# Bin folder
+Bin
