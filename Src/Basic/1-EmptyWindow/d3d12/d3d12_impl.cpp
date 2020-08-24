@@ -17,16 +17,16 @@ using Microsoft::WRL::ComPtr;
 
 static ComPtr<IDXGIAdapter>                 g_adapter = nullptr;
 static ComPtr<ID3D12Device2>                g_d3d12Device = nullptr;
-static ComPtr<ID3D12CommandQueue>           g_commandQueue = nullptr;
-static ComPtr<IDXGISwapChain4>              g_swapChain = nullptr;
-static ComPtr<ID3D12DescriptorHeap>         g_descriptorHeap = nullptr;
-static ComPtr<ID3D12Resource>               g_backBuffers[NUM_FRAMES] = { nullptr, nullptr, nullptr };
-static ComPtr<ID3D12CommandAllocator>       g_commandListAllocator[NUM_FRAMES] = { nullptr, nullptr, nullptr };
-static ComPtr<ID3D12GraphicsCommandList>    g_commandList = nullptr;
+static ComPtr<ID3D12CommandQueue>           g_command_queue = nullptr;
+static ComPtr<IDXGISwapChain4>              g_swap_chain = nullptr;
+static ComPtr<ID3D12DescriptorHeap>         g_descriptor_heap = nullptr;
+static ComPtr<ID3D12Resource>               g_back_buffers[NUM_FRAMES] = { nullptr, nullptr, nullptr };
+static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES] = { nullptr, nullptr, nullptr };
+static ComPtr<ID3D12GraphicsCommandList>    g_command_list = nullptr;
 static ComPtr<ID3D12Fence>                  g_fence = nullptr;
 static HANDLE                               g_fence_event;
 
-static unsigned int                         g_currentBackBufferIndex = 0;
+static unsigned int                         g_current_back_buffer_index = 0;
 static unsigned int                         g_rtv_size = 0;
 static UINT64                               g_fence_value = 0;
 static UINT64                               g_frame_fence_values[NUM_FRAMES];
@@ -112,7 +112,7 @@ bool initialize_d3d12(const HWND hwnd) {
     desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
-    ret = g_d3d12Device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_commandQueue));
+    ret = g_d3d12Device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
     if (FAILED(ret)) {
         MessageBox(nullptr, L"Unable to find d3d12 command queue.", L"Error", MB_OK);
         return false;
@@ -148,7 +148,7 @@ bool initialize_d3d12(const HWND hwnd) {
     swapChainDesc.Flags = 0;
 
     ComPtr<IDXGISwapChain1> swapChain1;
-    ret = dxgiFactory4->CreateSwapChainForHwnd(g_commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
+    ret = dxgiFactory4->CreateSwapChainForHwnd(g_command_queue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
     if (FAILED(ret))
         return false;
 
@@ -157,26 +157,29 @@ bool initialize_d3d12(const HWND hwnd) {
     if (FAILED(ret))
         return false;
 
-    swapChain1.As(&g_swapChain);
+    swapChain1.As(&g_swap_chain);
 
     for (auto i = 0; i < NUM_FRAMES; ++i) {
         // create command list allocator
-        ret = g_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_commandListAllocator[i]));
+        ret = g_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
         if (FAILED(ret))
             return false;
     }
 
+    // get the currnet frame back buffer index
+    g_current_back_buffer_index = g_swap_chain->GetCurrentBackBufferIndex();
+
     // create the command list
-    ret = g_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_commandListAllocator[0].Get(), nullptr, IID_PPV_ARGS(&g_commandList));
+    ret = g_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_command_list_allocators[0].Get(), nullptr, IID_PPV_ARGS(&g_command_list));
     if (FAILED(ret))
         return false;
-    g_commandList->Close();
+    g_command_list->Close();
 
     // create descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
     heap_desc.NumDescriptors = NUM_FRAMES;
     heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    ret = g_d3d12Device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptorHeap));
+    ret = g_d3d12Device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptor_heap));
     if (FAILED(ret))
         return false;
 
@@ -184,16 +187,16 @@ bool initialize_d3d12(const HWND hwnd) {
     g_rtv_size = g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
     // create the render target view for each buffer in the swap chain.
-    auto handle = g_descriptorHeap->GetCPUDescriptorHandleForHeapStart();
+    auto handle = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
     for (int i = 0; i < NUM_FRAMES; ++i)
     {
         ComPtr<ID3D12Resource> backBuffer;
-        auto ret = g_swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
+        auto ret = g_swap_chain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
         if (FAILED(ret))
             return false;
 
         g_d3d12Device->CreateRenderTargetView(backBuffer.Get(), nullptr, handle);
-        g_backBuffers[i] = backBuffer;
+        g_back_buffers[i] = backBuffer;
         handle.ptr = handle.ptr + g_rtv_size;
     }
 
@@ -207,9 +210,9 @@ bool initialize_d3d12(const HWND hwnd) {
 }
 
 void render_frame() {
-    auto commandAllocator = g_commandListAllocator[g_currentBackBufferIndex];
-    auto backBuffer = g_backBuffers[g_currentBackBufferIndex];
-    auto commandList = g_commandList;
+    auto commandAllocator = g_command_list_allocators[g_current_back_buffer_index];
+    auto backBuffer = g_back_buffers[g_current_back_buffer_index];
+    auto commandList = g_command_list;
 
     // reset the command list allocator
     {
@@ -236,7 +239,7 @@ void render_frame() {
         g += 0.05f;
         FLOAT clearColor[] = { 0.4f, 0.6f, sinf(g), 1.0f };
         D3D12_CPU_DESCRIPTOR_HANDLE rtv;
-        rtv.ptr = g_descriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + g_currentBackBufferIndex * g_rtv_size;
+        rtv.ptr = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart().ptr + g_current_back_buffer_index * g_rtv_size;
         commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
     }
 
@@ -259,29 +262,29 @@ void render_frame() {
     ID3D12CommandList* const commandLists[] = {
         commandList.Get()
     };
-    g_commandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+    g_command_queue->ExecuteCommandLists(_countof(commandLists), commandLists);
 
     // present the frame
     UINT syncInterval = g_vsync ? 1 : 0;
-    g_swapChain->Present(syncInterval, 0);
+    g_swap_chain->Present(syncInterval, 0);
 
     // signal the fence after this frame is done on GPU
-    g_frame_fence_values[g_currentBackBufferIndex] = g_commandQueue->Signal(g_fence.Get(), ++g_fence_value);
+    g_frame_fence_values[g_current_back_buffer_index] = g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
 
     // get the currnet frame back buffer index
-    g_currentBackBufferIndex = g_swapChain->GetCurrentBackBufferIndex();
+    g_current_back_buffer_index = g_swap_chain->GetCurrentBackBufferIndex();
 
     // wait for the fence value if CPU is three frames ahead of GPU
-    if (g_fence->GetCompletedValue() < g_frame_fence_values[g_currentBackBufferIndex])
+    if (g_fence->GetCompletedValue() < g_frame_fence_values[g_current_back_buffer_index])
     {
-        g_fence->SetEventOnCompletion(g_frame_fence_values[g_currentBackBufferIndex], g_fence_event);
+        g_fence->SetEventOnCompletion(g_frame_fence_values[g_current_back_buffer_index], g_fence_event);
         ::WaitForSingleObject(g_fence_event, INFINITE);
     }
 }
 
 void shutdown_d3d12() {
     // make sure all commands on gpu command list are executed already on GPU
-    auto fenceValueForSignal = g_commandQueue->Signal(g_fence.Get(), ++g_fence_value);
+    auto fenceValueForSignal = g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
     if (g_fence->GetCompletedValue() < fenceValueForSignal)
     {
         g_fence->SetEventOnCompletion(fenceValueForSignal, g_fence_event);
@@ -292,14 +295,14 @@ void shutdown_d3d12() {
     ::CloseHandle(g_fence_event);
 
     SAFE_RELEASE(g_fence);
-    SAFE_RELEASE(g_commandList);
+    SAFE_RELEASE(g_command_list);
     for (auto i = 0; i < NUM_FRAMES; ++i) {
-        SAFE_RELEASE(g_commandListAllocator[i]);
-        SAFE_RELEASE(g_backBuffers[i]);
+        SAFE_RELEASE(g_command_list_allocators[i]);
+        SAFE_RELEASE(g_back_buffers[i]);
     }
-    SAFE_RELEASE(g_descriptorHeap);
-    SAFE_RELEASE(g_swapChain);
-    SAFE_RELEASE(g_commandQueue);
+    SAFE_RELEASE(g_descriptor_heap);
+    SAFE_RELEASE(g_swap_chain);
+    SAFE_RELEASE(g_command_queue);
     SAFE_RELEASE(g_d3d12Device);
     SAFE_RELEASE(g_adapter);
 }
