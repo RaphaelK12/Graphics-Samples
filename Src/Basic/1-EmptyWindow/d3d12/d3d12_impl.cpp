@@ -13,7 +13,6 @@
 using Microsoft::WRL::ComPtr;
 
 #define NUM_FRAMES          3
-#define SAFE_RELEASE(p)     if(p) { p->Release(); p = nullptr; }
 
 static ComPtr<IDXGIAdapter>                 g_adapter = nullptr;
 static ComPtr<ID3D12Device2>                g_d3d12Device = nullptr;
@@ -62,6 +61,26 @@ bool initialize_d3d12(const HWND hwnd) {
         MessageBox(nullptr, L"Unable to find d3d12 compatible adapter, please make sure you have a d3d12 compatible display card on your machine.", L"Error", MB_OK);
         return false;
     }
+
+#if defined(_DEBUG)
+    // enable GPU validation
+    {
+        ComPtr<ID3D12Debug> spDebugController0;
+        ComPtr<ID3D12Debug1> spDebugController1;
+        D3D12GetDebugInterface(IID_PPV_ARGS(&spDebugController0));
+        spDebugController0->QueryInterface(IID_PPV_ARGS(&spDebugController1));
+        spDebugController1->SetEnableGPUBasedValidation(true);
+    }
+
+    // enable the D3D12 debug layer.
+    {
+        ComPtr<ID3D12Debug> debugController;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+        {
+            debugController->EnableDebugLayer();
+        }
+    }
+#endif
 
     // create d3d12 device
     auto ret = D3D12CreateDevice(g_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_d3d12Device));
@@ -114,7 +133,7 @@ bool initialize_d3d12(const HWND hwnd) {
     desc.NodeMask = 0;
     ret = g_d3d12Device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
     if (FAILED(ret)) {
-        MessageBox(nullptr, L"Unable to find d3d12 command queue.", L"Error", MB_OK);
+        MessageBox(nullptr, L"Unable to create d3d12 command queue.", L"Error", MB_OK);
         return false;
     }
 
@@ -269,7 +288,8 @@ void render_frame() {
     g_swap_chain->Present(syncInterval, 0);
 
     // signal the fence after this frame is done on GPU
-    g_frame_fence_values[g_current_back_buffer_index] = g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
+    g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
+    g_frame_fence_values[g_current_back_buffer_index] = g_fence_value;
 
     // get the currnet frame back buffer index
     g_current_back_buffer_index = g_swap_chain->GetCurrentBackBufferIndex();
@@ -284,25 +304,26 @@ void render_frame() {
 
 void shutdown_d3d12() {
     // make sure all commands on gpu command list are executed already on GPU
-    auto fenceValueForSignal = g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
-    if (g_fence->GetCompletedValue() < fenceValueForSignal)
+    g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
+    auto cur = g_fence->GetCompletedValue();
+    if ( cur < g_fence_value)
     {
-        g_fence->SetEventOnCompletion(fenceValueForSignal, g_fence_event);
+        g_fence->SetEventOnCompletion(g_fence_value, g_fence_event);
         ::WaitForSingleObject(g_fence_event, INFINITE);
     }
 
     // close the event handle
     ::CloseHandle(g_fence_event);
 
-    SAFE_RELEASE(g_fence);
-    SAFE_RELEASE(g_command_list);
+    g_fence = nullptr;
+    g_command_list = nullptr;
     for (auto i = 0; i < NUM_FRAMES; ++i) {
-        SAFE_RELEASE(g_command_list_allocators[i]);
-        SAFE_RELEASE(g_back_buffers[i]);
+        g_command_list_allocators[i] = nullptr;
+        g_back_buffers[i] = nullptr;
     }
-    SAFE_RELEASE(g_descriptor_heap);
-    SAFE_RELEASE(g_swap_chain);
-    SAFE_RELEASE(g_command_queue);
-    SAFE_RELEASE(g_d3d12Device);
-    SAFE_RELEASE(g_adapter);
+    g_descriptor_heap = nullptr;
+    g_swap_chain = nullptr;
+    g_command_queue = nullptr;
+    g_d3d12Device = nullptr;
+    g_adapter = nullptr;
 }
