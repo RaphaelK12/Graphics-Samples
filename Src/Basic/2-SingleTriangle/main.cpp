@@ -10,7 +10,7 @@
 
 // class name and window title
 static constexpr wchar_t  CLASS_NAME[] = L"Jiayin's Graphics Samples";
-static constexpr wchar_t  WINDOW_TITLE[] = L"1 - EmptyWindow";
+static constexpr wchar_t  WINDOW_TITLE[] = L"2 - SingleTriangle";
 
 // Whether the program is quitting
 static bool g_quiting = false;

@@ -7,4 +7,4 @@
 add_subdirectory(1-EmptyWindow)
 
 # 2. Single Triangle
-#add_subdirectory(Src/2-SingleTriangle)
+add_subdirectory(2-SingleTriangle)
