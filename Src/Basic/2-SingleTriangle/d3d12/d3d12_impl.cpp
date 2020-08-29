@@ -47,6 +47,8 @@ static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES
 // Fence object is used to make sure CPU is never too fast. In this tutorial, if it is 3 frames ahead of GPU, it will be 
 // stalled.
 static ComPtr<ID3D12Fence>                  g_fence = nullptr;
+// The committed heap for geometry data, including vertex buffer and index buffer
+static ComPtr<ID3D12Resource>               g_geometry_buffer = nullptr;
 
 
 // Following are some generic data of this tutorial program.
@@ -62,7 +64,42 @@ static unsigned int                         g_rtv_size = 0;
 static UINT64                               g_fence_value = 0;
 // The catched value of the three frames. It keeps track of what value we used to write to the fence in the past three frames.
 static UINT64                               g_frame_fence_values[NUM_FRAMES];
+// The vertex buffer view
+D3D12_VERTEX_BUFFER_VIEW                    g_vertex_buffer_view;
+D3D12_INDEX_BUFFER_VIEW                     g_index_buffer_view;
 
+// Following are definition of vertices data
+
+struct float3 {
+    float x, y, z;
+};
+
+/*
+ * Each vertex only has position and color in it. For simplicity, position data are already defined in NDC, no transformation is
+ * needed in vertex shader anymore.
+ */
+struct Vertex{
+    float3 position;    // clip space position
+    float3 color;       // a color for each vertex
+};
+
+/*
+ * There are only three vertices, it is a triangle in the middle of the screen.
+ */
+static Vertex g_vertices[] = {
+    { {-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f} },
+    { {-1.0f,  1.0f, 0.0f}, {0.0f, 1.0f, 0.0f} },
+    { { 1.0f,  1.0f, 0.0f}, {1.0f, 1.0f, 0.0f} },
+};
+
+/*
+ * Indices data of the vertex buffer.
+ */
+static unsigned int g_indices[] = { 0, 1, 2 };
+
+// indices count
+const unsigned int g_indices_cnt = _countof(g_indices);
+const unsigned int g_vertices_cnt = _countof(g_vertices);
 
 /*
  * This function helps locate the adapter with the largest dram.
@@ -306,6 +343,16 @@ bool create_rtvs() {
 
 
 /*
+ * Helper function help to flush the command queue
+ */
+void flush_command_queue() {
+    g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
+    g_fence->SetEventOnCompletion(g_fence_value, g_fence_event);
+    WaitForSingleObject(g_fence_event, INFINITE);
+}
+
+
+/*
  * Create a fence for synchronization.
  */
 bool create_fence() {
@@ -322,6 +369,112 @@ bool create_fence() {
 
 
 /*
+ * A helper utility function to make resource transition a bit easier.
+ */
+template<D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after>
+void resource_transition(ID3D12GraphicsCommandList* command_list, ID3D12Resource* resource) {
+    D3D12_RESOURCE_BARRIER barrier;
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+    barrier.Transition.pResource = resource;
+    barrier.Transition.StateBefore = before;
+    barrier.Transition.StateAfter = after;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    command_list->ResourceBarrier(1, &barrier);
+}
+
+
+/*
+ * This function helps to create a geomtry buffer, vertex buffer view and index buffer view.
+ */
+bool create_geomtry_data() {
+    constexpr size_t sizeofVertex = sizeof(Vertex);
+    constexpr size_t sizeofVertices = sizeofVertex * _countof(g_vertices);
+    constexpr size_t sizeofIndex = sizeof(short int);
+    constexpr size_t sizeofIndices = sizeofIndex * _countof(g_indices);
+    constexpr size_t totalSize = sizeofVertices + sizeofIndices;
+
+    D3D12_RESOURCE_DESC buffer_desc = {};
+    buffer_desc.Alignment = 0;
+    buffer_desc.DepthOrArraySize = 1;
+    buffer_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer_desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    buffer_desc.Format = DXGI_FORMAT_UNKNOWN;
+    buffer_desc.Height = 1;
+    buffer_desc.Width = totalSize;
+    buffer_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    buffer_desc.MipLevels = 1;
+    buffer_desc.SampleDesc.Count = 1;
+    buffer_desc.SampleDesc.Quality = 0;
+
+    ComPtr<ID3D12Resource> upload_buffer = nullptr;
+    D3D12_HEAP_PROPERTIES upload_heap_prop;
+    upload_heap_prop.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    upload_heap_prop.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    upload_heap_prop.Type = D3D12_HEAP_TYPE_UPLOAD;
+    upload_heap_prop.VisibleNodeMask = 1;
+    upload_heap_prop.CreationNodeMask = 1;
+
+    if (FAILED(g_d3d12Device->CreateCommittedResource(
+        &upload_heap_prop,
+        D3D12_HEAP_FLAG_NONE,
+        &buffer_desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&upload_buffer)
+    )))
+        return false;
+
+    D3D12_HEAP_PROPERTIES heap_prop;
+    heap_prop.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+    heap_prop.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+    heap_prop.Type = D3D12_HEAP_TYPE_DEFAULT;
+    heap_prop.VisibleNodeMask = 1;
+    heap_prop.CreationNodeMask = 1;
+
+    if (FAILED(g_d3d12Device->CreateCommittedResource(
+        &heap_prop,
+        D3D12_HEAP_FLAG_NONE,
+        &buffer_desc,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&g_geometry_buffer)
+    )))
+        return false;
+
+    // copy the data to the uploading buffer
+    UINT8* pRaw = 0;
+    upload_buffer->Map(0, 0, reinterpret_cast<void**>(&pRaw));
+    memcpy(pRaw, g_vertices, sizeofVertices);
+    memcpy(pRaw + sizeofVertices, g_indices, sizeofIndices);
+    upload_buffer->Unmap(0, 0);
+
+    g_command_list_allocators[0]->Reset();
+    g_command_list->Reset(g_command_list_allocators[0].Get(), 0);
+
+    resource_transition<D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST>(g_command_list.Get(), g_geometry_buffer.Get());
+    g_command_list->CopyBufferRegion(g_geometry_buffer.Get(), 0, upload_buffer.Get(), 0, totalSize);
+    resource_transition<D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER>(g_command_list.Get(), g_geometry_buffer.Get());
+
+    g_command_list->Close();
+
+    // execute the command list
+    ID3D12CommandList* const commandLists[] = {
+        g_command_list.Get()
+    };
+    g_command_queue->ExecuteCommandLists(1, commandLists);
+
+    // flush the command queue
+    flush_command_queue();
+
+    // create the vertex buffer and index buffer view
+    g_vertex_buffer_view = D3D12_VERTEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress(), sizeofVertices, sizeofVertex };
+    g_index_buffer_view = D3D12_INDEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress() + sizeofVertices, sizeofIndices, DXGI_FORMAT_R32_UINT };
+
+    return true;
+}
+
+/*
  * Initialize d3d12, this includes
  *   - pick a d3d12 compatible adapter
  *   - enable gpu validation
@@ -331,6 +484,7 @@ bool create_fence() {
  *   - creata a command list and three command allocators
  *   - create a descriptor heap and setup the render target views
  *   - create a fence object for CPU and GPU synchronization
+ *   - create the geometry data
  */
 bool initialize_d3d12(const HWND hwnd) {
     auto ret = enum_adapter();
@@ -363,25 +517,12 @@ bool initialize_d3d12(const HWND hwnd) {
     if (!ret)
         return false;
 
+    ret = create_geomtry_data();
+    if (!ret)
+        return false;
+
     return true;
 }
-
-
-/*
- * A helper utility function to make resource transition a bit easier.
- */
-template<D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after>
-void backbuffer_state_transition(ID3D12GraphicsCommandList* command_list, ID3D12Resource* resource) {
-    D3D12_RESOURCE_BARRIER barrier;
-    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-    barrier.Transition.pResource = resource;
-    barrier.Transition.StateBefore = before;
-    barrier.Transition.StateAfter = after;
-    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    command_list->ResourceBarrier(1, &barrier);
-}
-
 
 /*
  * Render a frame.
@@ -407,7 +548,7 @@ void render_frame() {
         //
         // Swap chain back buffers automatically start out in the D3D12_RESOURCE_STATE_COMMON state.
         // D3D12_RESOURCE_STATE_PRESENT is a synonym for D3D12_RESOURCE_STATE_COMMON.
-        backbuffer_state_transition<D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET>(commandList.Get(), backBuffer.Get());
+        resource_transition<D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET>(commandList.Get(), backBuffer.Get());
     }
 
     // simply clear the back buffer
@@ -422,7 +563,7 @@ void render_frame() {
 
     // before the back buffer can be present again, it needs to transit back to present state.
     {
-        backbuffer_state_transition<D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT>(commandList.Get(), backBuffer.Get());
+        resource_transition<D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT>(commandList.Get(), backBuffer.Get());
     }
 
     // the only command needed in the command list is the clear call and we are done here
@@ -457,13 +598,8 @@ void render_frame() {
  * Shutdown d3d12, deallocate all resources we used in rendering.
  */
 void shutdown_d3d12() {
-    // flush the gpu command queue to make sure there is nothing to be read later.
-    g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
-    if (g_fence->GetCompletedValue() < g_fence_value)
-    {
-        g_fence->SetEventOnCompletion(g_fence_value, g_fence_event);
-        ::WaitForSingleObject(g_fence_event, INFINITE);
-    }
+    // flush the command queue to make sure nothing is left in it before releasing anything.
+    flush_command_queue();
 
     // close the event handle
     ::CloseHandle(g_fence_event);
