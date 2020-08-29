@@ -7,6 +7,7 @@
 #include <dxgi1_6.h>
 #include <d3d12.h>
 #include <math.h>
+#include <d3dcompiler.h>
 #include "d3d12_impl.h"
 
 using Microsoft::WRL::ComPtr;
@@ -474,6 +475,23 @@ bool create_geomtry_data() {
     return true;
 }
 
+
+/*
+ * Create pipeline state objects
+ */
+bool create_pso() {
+    // Load the compiled shader blobs first.
+    ComPtr<ID3DBlob> vertex_shader_blob, pixel_shader_blob;
+    auto ret = D3DReadFileToBlob(L"../Resources/Shaders/vso_1_single_triangle.cso", &vertex_shader_blob);
+    if (FAILED(ret))
+        return false;
+    ret = D3DReadFileToBlob(L"../Resources/Shaders/pso_1_single_triangle.cso", &pixel_shader_blob);
+    if (FAILED(ret))
+        return false;
+
+    return true;
+}
+
 /*
  * Initialize d3d12, this includes
  *   - pick a d3d12 compatible adapter
@@ -485,6 +503,7 @@ bool create_geomtry_data() {
  *   - create a descriptor heap and setup the render target views
  *   - create a fence object for CPU and GPU synchronization
  *   - create the geometry data
+ *   - create pipeline state object
  */
 bool initialize_d3d12(const HWND hwnd) {
     auto ret = enum_adapter();
@@ -521,6 +540,10 @@ bool initialize_d3d12(const HWND hwnd) {
     if (!ret)
         return false;
 
+    ret = create_pso();
+    if (!ret)
+        return false;
+
     return true;
 }
 
@@ -553,9 +576,7 @@ void render_frame() {
 
     // simply clear the back buffer
     {
-        static float g = 0.0f;
-        g += 0.05f;
-        FLOAT clearColor[] = { 0.4f, 0.6f, sinf(g), 1.0f };
+        FLOAT clearColor[] = { 0.4f, 0.6f, 1.0f, 1.0f };
         D3D12_CPU_DESCRIPTOR_HANDLE rtv;
         rtv.ptr = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart().ptr + g_current_back_buffer_index * g_rtv_size;
         commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);

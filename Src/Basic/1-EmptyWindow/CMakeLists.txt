@@ -3,10 +3,8 @@
 #  Copyright (c) 2020-2020 by Jiayin Cao - All rights reserved.
 #
 
-file(GLOB_RECURSE project_headers *.h *.hpp)
 file(GLOB_RECURSE project_cpps *.cpp)
 file(GLOB_RECURSE project_cs *.c)
-file(GLOB_RECURSE project_ccs *.cc)
 
 set(all_files ${project_headers} ${project_cpps} ${project_cs} ${project_ccs})
 source_group_by_dir(all_files)
