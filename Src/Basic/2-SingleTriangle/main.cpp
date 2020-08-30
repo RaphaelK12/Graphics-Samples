@@ -15,6 +15,9 @@ static constexpr wchar_t  WINDOW_TITLE[] = L"2 - SingleTriangle";
 // Whether the program is quitting
 static bool g_quiting = false;
 
+constexpr unsigned int g_window_width = 1280;
+constexpr unsigned int g_window_height = 720;
+
 static inline LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_DESTROY:
@@ -47,8 +50,8 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
     RegisterClassExW(&wcex);
 
     // Create the window.
-    HWND hwnd = CreateWindowW(CLASS_NAME, WINDOW_TITLE, WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInInstance, nullptr);
+    HWND hwnd = CreateWindowW(CLASS_NAME, WINDOW_TITLE, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        CW_USEDEFAULT, 0, g_window_width, g_window_height, nullptr, nullptr, hInInstance, nullptr);
     if (hwnd == NULL)
         return 0;
 
