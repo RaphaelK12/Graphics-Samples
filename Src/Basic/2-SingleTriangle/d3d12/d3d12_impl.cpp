@@ -24,7 +24,7 @@ static constexpr unsigned NUM_FRAMES = 3;
 // An adapter is the abstraction of graphics hardware
 static ComPtr<IDXGIAdapter>                 g_adapter = nullptr;
 // A d3d12 device is responsible for things like creating resources.
-static ComPtr<ID3D12Device2>                g_d3d12Device = nullptr;
+static ComPtr<ID3D12Device2>                g_d3d12_device = nullptr;
 // Command queue is the software abstraction of GPU hardware command queue. There are three type of command queues on
 // modern graphics hardware, which is also true in d3d12, graphics queue, compute queue and copy queue.
 // Only graphics queue is used in this tutorial.
@@ -50,7 +50,10 @@ static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES
 static ComPtr<ID3D12Fence>                  g_fence = nullptr;
 // The committed heap for geometry data, including vertex buffer and index buffer
 static ComPtr<ID3D12Resource>               g_geometry_buffer = nullptr;
-
+// The root signature
+static ComPtr<ID3D12RootSignature>          g_root_signature = nullptr;
+// Pipeline state object for the draw call
+static ComPtr<ID3D12PipelineState>          g_pipeline_state_object = nullptr;
 
 // Following are some generic data of this tutorial program.
 
@@ -68,6 +71,10 @@ static UINT64                               g_frame_fence_values[NUM_FRAMES];
 // The vertex buffer view
 D3D12_VERTEX_BUFFER_VIEW                    g_vertex_buffer_view;
 D3D12_INDEX_BUFFER_VIEW                     g_index_buffer_view;
+
+// windows client size
+unsigned int                                g_window_width = 0;
+unsigned int                                g_window_height = 0;
 
 // Following are definition of vertices data
 
@@ -88,9 +95,9 @@ struct Vertex{
  * There are only three vertices, it is a triangle in the middle of the screen.
  */
 static Vertex g_vertices[] = {
-    { {-1.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 0.0f} },
-    { {-1.0f,  1.0f, 0.0f}, {0.0f, 1.0f, 0.0f} },
-    { { 1.0f,  1.0f, 0.0f}, {1.0f, 1.0f, 0.0f} },
+    { {-0.4f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f} },
+    { { 0.4f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f} },
+    { { 0.0f,  0.5f,  0.0f}, {1.0f, 0.0f, 0.0f} },
 };
 
 /*
@@ -171,7 +178,7 @@ void enable_gpu_validation() {
  */
 bool create_d3d12_device() {
     // create d3d12 device
-    auto ret = D3D12CreateDevice(g_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_d3d12Device));
+    auto ret = D3D12CreateDevice(g_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_d3d12_device));
     if (FAILED(ret)) {
         MessageBox(nullptr, L"Unable to find d3d12 compatible device, please make sure you have a d3d12 compatible display card on your machine.", L"Error", MB_OK);
         return false;
@@ -179,7 +186,7 @@ bool create_d3d12_device() {
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> pInfoQueue;
-    if (SUCCEEDED(g_d3d12Device.As(&pInfoQueue)))
+    if (SUCCEEDED(g_d3d12_device.As(&pInfoQueue)))
     {
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
@@ -227,7 +234,7 @@ bool create_command_queue() {
     desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
-    const auto ret = g_d3d12Device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
+    const auto ret = g_d3d12_device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
     if (FAILED(ret)) {
         MessageBox(nullptr, L"Unable to create d3d12 command queue.", L"Error", MB_OK);
         return false;
@@ -235,7 +242,6 @@ bool create_command_queue() {
 
     return true;
 }
-
 
 /*
  * Create a swap chain.
@@ -270,6 +276,9 @@ bool create_swap_chain(HWND hwnd) {
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     swapChainDesc.Flags = 0;
 
+    g_window_width = swapChainDesc.Width;
+    g_window_height = swapChainDesc.Height;
+
     ComPtr<IDXGISwapChain1> swapChain1;
     ret = dxgiFactory4->CreateSwapChainForHwnd(g_command_queue.Get(), hwnd, &swapChainDesc, nullptr, nullptr, &swapChain1);
     if (FAILED(ret))
@@ -295,13 +304,13 @@ bool create_swap_chain(HWND hwnd) {
 bool create_commands() {
     for (auto i = 0; i < NUM_FRAMES; ++i) {
         // create command list allocator
-        const auto ret = g_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
+        const auto ret = g_d3d12_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
         if (FAILED(ret))
             return false;
     }
 
     // create the command list
-    const auto ret = g_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_command_list_allocators[0].Get(), nullptr, IID_PPV_ARGS(&g_command_list));
+    const auto ret = g_d3d12_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_command_list_allocators[0].Get(), nullptr, IID_PPV_ARGS(&g_command_list));
     if (FAILED(ret))
         return false;
     g_command_list->Close();
@@ -318,12 +327,12 @@ bool create_rtvs() {
     D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
     heap_desc.NumDescriptors = NUM_FRAMES;
     heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    const auto ret = g_d3d12Device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptor_heap));
+    const auto ret = g_d3d12_device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptor_heap));
     if (FAILED(ret))
         return false;
 
     // descriptor size could be vendor dependent
-    g_rtv_size = g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    g_rtv_size = g_d3d12_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
     // create the render target view for each buffer in the swap chain.
     auto handle = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
@@ -334,14 +343,13 @@ bool create_rtvs() {
         if (FAILED(ret))
             return false;
 
-        g_d3d12Device->CreateRenderTargetView(backBuffer.Get(), nullptr, handle);
+        g_d3d12_device->CreateRenderTargetView(backBuffer.Get(), nullptr, handle);
         g_back_buffers[i] = backBuffer;
         handle.ptr = handle.ptr + g_rtv_size;
     }
 
     return true;
 }
-
 
 /*
  * Helper function help to flush the command queue
@@ -358,7 +366,7 @@ void flush_command_queue() {
  */
 bool create_fence() {
     // create a fence, this is for synchronization between cpu and gpu
-    const auto ret = g_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
+    const auto ret = g_d3d12_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
     if (FAILED(ret))
         return false;
 
@@ -391,7 +399,7 @@ void resource_transition(ID3D12GraphicsCommandList* command_list, ID3D12Resource
 bool create_geomtry_data() {
     constexpr size_t sizeofVertex = sizeof(Vertex);
     constexpr size_t sizeofVertices = sizeofVertex * _countof(g_vertices);
-    constexpr size_t sizeofIndex = sizeof(short int);
+    constexpr size_t sizeofIndex = sizeof(unsigned int);
     constexpr size_t sizeofIndices = sizeofIndex * _countof(g_indices);
     constexpr size_t totalSize = sizeofVertices + sizeofIndices;
 
@@ -416,7 +424,7 @@ bool create_geomtry_data() {
     upload_heap_prop.VisibleNodeMask = 1;
     upload_heap_prop.CreationNodeMask = 1;
 
-    if (FAILED(g_d3d12Device->CreateCommittedResource(
+    if (FAILED(g_d3d12_device->CreateCommittedResource(
         &upload_heap_prop,
         D3D12_HEAP_FLAG_NONE,
         &buffer_desc,
@@ -433,7 +441,7 @@ bool create_geomtry_data() {
     heap_prop.VisibleNodeMask = 1;
     heap_prop.CreationNodeMask = 1;
 
-    if (FAILED(g_d3d12Device->CreateCommittedResource(
+    if (FAILED(g_d3d12_device->CreateCommittedResource(
         &heap_prop,
         D3D12_HEAP_FLAG_NONE,
         &buffer_desc,
@@ -489,8 +497,49 @@ bool create_pso() {
     if (FAILED(ret))
         return false;
 
-    return true;
+    // This tutorial is simple enough that no root-signature is needed
+    D3D12_ROOT_SIGNATURE_DESC rootSig = { 0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT };
+    ComPtr<ID3DBlob> blob_sig, blob_errors;
+    ret = D3D12SerializeRootSignature(&rootSig, D3D_ROOT_SIGNATURE_VERSION_1, &blob_sig, &blob_errors);
+    if (FAILED(ret))
+        return false;
+    ret = g_d3d12_device->CreateRootSignature(0, blob_sig->GetBufferPointer(), blob_sig->GetBufferSize(), __uuidof(ID3D12RootSignature), (void**)&g_root_signature);
+    if (FAILED(ret))
+        return false;
+
+    const D3D12_INPUT_ELEMENT_DESC input_layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D12_APPEND_ALIGNED_ELEMENT, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+    };
+    const UINT numInputLayoutElements = _countof(input_layout);
+
+    // Create Pipeline State Object
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC psod;
+    memset(&psod, 0, sizeof(psod));
+    psod.pRootSignature = g_root_signature.Get();
+    psod.VS.BytecodeLength = vertex_shader_blob->GetBufferSize();
+    psod.VS.pShaderBytecode = vertex_shader_blob->GetBufferPointer();
+    psod.PS.BytecodeLength = pixel_shader_blob->GetBufferSize();
+    psod.PS.pShaderBytecode = pixel_shader_blob->GetBufferPointer();
+    psod.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+    psod.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    psod.RasterizerState.FrontCounterClockwise = true;
+    psod.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    psod.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+    psod.SampleDesc.Count = 1;
+    psod.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    psod.NumRenderTargets = 1;
+    psod.SampleMask = UINT_MAX;
+    psod.InputLayout = { input_layout, numInputLayoutElements };
+    psod.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
+    psod.DSVFormat = DXGI_FORMAT_UNKNOWN;
+    psod.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+    psod.DepthStencilState.DepthEnable = false;
+    psod.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+
+    return SUCCEEDED(g_d3d12_device->CreateGraphicsPipelineState(&psod, __uuidof(ID3D12PipelineState), (void**)&g_pipeline_state_object));
 }
+
 
 /*
  * Initialize d3d12, this includes
@@ -580,6 +629,35 @@ void render_frame() {
         D3D12_CPU_DESCRIPTOR_HANDLE rtv;
         rtv.ptr = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart().ptr + g_current_back_buffer_index * g_rtv_size;
         commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
+
+        commandList->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    }
+
+    // issue the draw call to draw a triangle
+    {
+        commandList->SetPipelineState(g_pipeline_state_object.Get());
+        commandList->SetGraphicsRootSignature(g_root_signature.Get());
+
+        commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        commandList->IASetVertexBuffers(0, 1, &g_vertex_buffer_view);
+        commandList->IASetIndexBuffer(&g_index_buffer_view);
+
+        D3D12_VIEWPORT viewport;
+        viewport.TopLeftX = viewport.TopLeftY = 0;
+        viewport.Width = (float)g_window_width;
+        viewport.Height = (float)g_window_height;
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+        commandList->RSSetViewports(1, &viewport);
+
+        D3D12_RECT scissor_rect;
+        scissor_rect.left = 0;
+        scissor_rect.top = 0;
+        scissor_rect.right = g_window_width;
+        scissor_rect.bottom = g_window_height;
+        commandList->RSSetScissorRects(1, &scissor_rect);
+
+        commandList->DrawIndexedInstanced(g_indices_cnt, 1, 0, 0, 0);
     }
 
     // before the back buffer can be present again, it needs to transit back to present state.
@@ -627,6 +705,9 @@ void shutdown_d3d12() {
 
     // These destruction is not totally necessary. However, instead of relying on the compiler to destroy them,
     // explicitly destruction will guarantee specific order of destruction.
+    g_geometry_buffer = nullptr;
+    g_root_signature = nullptr;
+    g_pipeline_state_object = nullptr;
     g_fence = nullptr;
     g_command_list = nullptr;
     for (auto i = 0; i < NUM_FRAMES; ++i) {
@@ -636,6 +717,6 @@ void shutdown_d3d12() {
     g_descriptor_heap = nullptr;
     g_swap_chain = nullptr;
     g_command_queue = nullptr;
-    g_d3d12Device = nullptr;
+    g_d3d12_device = nullptr;
     g_adapter = nullptr;
 }

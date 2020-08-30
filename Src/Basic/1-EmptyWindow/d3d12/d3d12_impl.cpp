@@ -23,7 +23,7 @@ static constexpr unsigned NUM_FRAMES = 3;
 // An adapter is the abstraction of graphics hardware
 static ComPtr<IDXGIAdapter>                 g_adapter = nullptr;
 // A d3d12 device is responsible for things like creating resources.
-static ComPtr<ID3D12Device2>                g_d3d12Device = nullptr;
+static ComPtr<ID3D12Device2>                g_d3d12_device = nullptr;
 // Command queue is the software abstraction of GPU hardware command queue. There are three type of command queues on
 // modern graphics hardware, which is also true in d3d12, graphics queue, compute queue and copy queue.
 // Only graphics queue is used in this tutorial.
@@ -133,7 +133,7 @@ void enable_gpu_validation() {
  */
 bool create_d3d12_device() {
     // create d3d12 device
-    auto ret = D3D12CreateDevice(g_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_d3d12Device));
+    auto ret = D3D12CreateDevice(g_adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_d3d12_device));
     if (FAILED(ret)) {
         MessageBox(nullptr, L"Unable to find d3d12 compatible device, please make sure you have a d3d12 compatible display card on your machine.", L"Error", MB_OK);
         return false;
@@ -141,7 +141,7 @@ bool create_d3d12_device() {
 
 #if defined(_DEBUG)
     ComPtr<ID3D12InfoQueue> pInfoQueue;
-    if (SUCCEEDED(g_d3d12Device.As(&pInfoQueue)))
+    if (SUCCEEDED(g_d3d12_device.As(&pInfoQueue)))
     {
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
         pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
@@ -189,7 +189,7 @@ bool create_command_queue() {
     desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
-    const auto ret = g_d3d12Device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
+    const auto ret = g_d3d12_device->CreateCommandQueue(&desc, IID_PPV_ARGS(&g_command_queue));
     if (FAILED(ret)) {
         MessageBox(nullptr, L"Unable to create d3d12 command queue.", L"Error", MB_OK);
         return false;
@@ -257,13 +257,13 @@ bool create_swap_chain(HWND hwnd) {
 bool create_commands() {
     for (auto i = 0; i < NUM_FRAMES; ++i) {
         // create command list allocator
-        const auto ret = g_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
+        const auto ret = g_d3d12_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
         if (FAILED(ret))
             return false;
     }
 
     // create the command list
-    const auto ret = g_d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_command_list_allocators[0].Get(), nullptr, IID_PPV_ARGS(&g_command_list));
+    const auto ret = g_d3d12_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_command_list_allocators[0].Get(), nullptr, IID_PPV_ARGS(&g_command_list));
     if (FAILED(ret))
         return false;
     g_command_list->Close();
@@ -280,12 +280,12 @@ bool create_rtvs() {
     D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
     heap_desc.NumDescriptors = NUM_FRAMES;
     heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    const auto ret = g_d3d12Device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptor_heap));
+    const auto ret = g_d3d12_device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&g_descriptor_heap));
     if (FAILED(ret))
         return false;
 
     // descriptor size could be vendor dependent
-    g_rtv_size = g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    g_rtv_size = g_d3d12_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
     // create the render target view for each buffer in the swap chain.
     auto handle = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart();
@@ -296,7 +296,7 @@ bool create_rtvs() {
         if (FAILED(ret))
             return false;
 
-        g_d3d12Device->CreateRenderTargetView(backBuffer.Get(), nullptr, handle);
+        g_d3d12_device->CreateRenderTargetView(backBuffer.Get(), nullptr, handle);
         g_back_buffers[i] = backBuffer;
         handle.ptr = handle.ptr + g_rtv_size;
     }
@@ -310,7 +310,7 @@ bool create_rtvs() {
  */
 bool create_fence() {
     // create a fence, this is for synchronization between cpu and gpu
-    const auto ret = g_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
+    const auto ret = g_d3d12_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
     if (FAILED(ret))
         return false;
 
@@ -479,6 +479,6 @@ void shutdown_d3d12() {
     g_descriptor_heap = nullptr;
     g_swap_chain = nullptr;
     g_command_queue = nullptr;
-    g_d3d12Device = nullptr;
+    g_d3d12_device = nullptr;
     g_adapter = nullptr;
 }
