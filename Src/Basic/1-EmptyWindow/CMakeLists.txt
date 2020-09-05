@@ -3,10 +3,11 @@
 #  Copyright (c) 2020-2020 by Jiayin Cao - All rights reserved.
 #
 
+file(GLOB_RECURSE project_headers *.h)
 file(GLOB_RECURSE project_cpps *.cpp)
 file(GLOB_RECURSE project_cs *.c)
 
-set(all_files ${project_headers} ${project_cpps} ${project_cs} ${project_ccs})
+set(all_files ${project_headers} ${project_cpps} ${project_cs} ${project_ccs} ${project_headers})
 source_group_by_dir(all_files)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_ROOT_DIR}/Bin")

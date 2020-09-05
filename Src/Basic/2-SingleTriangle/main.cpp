@@ -6,7 +6,9 @@
 #if PLATFORM_WIN
 
 #include <windows.h>
+#include <memory>
 #include "d3d12/d3d12_impl.h"
+#include "vulkan/vulkan_impl.h"
 
 // class name and window title
 static constexpr wchar_t  CLASS_NAME[] = L"Jiayin's Graphics Samples";
@@ -14,6 +16,9 @@ static constexpr wchar_t  WINDOW_TITLE[] = L"2 - SingleTriangle";
 
 // Whether the program is quitting
 static bool g_quiting = false;
+
+// By default is uses d3d12
+std::unique_ptr<GraphicsSample> g_graphics_sample = nullptr;
 
 constexpr unsigned int g_window_width = 1280;
 constexpr unsigned int g_window_height = 720;
@@ -55,12 +60,14 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
     if (hwnd == NULL)
         return 0;
 
-    // Initialize d3d12
-    const auto d3d12_initialized = initialize_d3d12(hwnd);
-    if (!d3d12_initialized) {
-        // shut down d3d12
-        shutdown_d3d12();
+    if (strcmp(lpCmdLine, "-vulkan") == 0)
+        g_graphics_sample = std::make_unique<VulkanGraphicsSample>();
+    else
+        g_graphics_sample = std::make_unique<D3D12GraphicsSample>();
 
+    // Initialize d3d12
+    const auto d3d12_initialized = g_graphics_sample->initialize(hwnd);
+    if (!d3d12_initialized) {
         MessageBox(nullptr, L"Failed to initialized d3d12.", L"Error", MB_OK);
         return -1;
     }
@@ -80,10 +87,8 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
             break;
 
         // render a frame
-        render_frame();
+        g_graphics_sample->render_frame();
     }
-
-    shutdown_d3d12();
 
     return 0;
 }

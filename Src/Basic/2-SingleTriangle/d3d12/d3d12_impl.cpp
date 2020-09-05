@@ -554,7 +554,7 @@ bool create_pso() {
  *   - create the geometry data
  *   - create pipeline state object
  */
-bool initialize_d3d12(const HWND hwnd) {
+bool D3D12GraphicsSample::initialize(const HWND hwnd) {
     auto ret = enum_adapter();
     if (!ret)
         return false;
@@ -599,7 +599,7 @@ bool initialize_d3d12(const HWND hwnd) {
 /*
  * Render a frame.
  */
-void render_frame() {
+void D3D12GraphicsSample::render_frame() {
     auto commandAllocator = g_command_list_allocators[g_current_back_buffer_index];
     auto backBuffer = g_back_buffers[g_current_back_buffer_index];
     auto commandList = g_command_list;
@@ -696,7 +696,7 @@ void render_frame() {
 /*
  * Shutdown d3d12, deallocate all resources we used in rendering.
  */
-void shutdown_d3d12() {
+void D3D12GraphicsSample::shutdown() {
     // flush the command queue to make sure nothing is left in it before releasing anything.
     flush_command_queue();
 

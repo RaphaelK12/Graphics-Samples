@@ -7,12 +7,12 @@
 
 #include "../sample.h"
 
-class D3D12GraphicsSample : public GraphicsSample {
+class VulkanGraphicsSample : public GraphicsSample {
 public:
     /*
-     * Destroy everything d3d12 related.
+     * Destroy everything vulkan related.
      */
-    ~D3D12GraphicsSample() override {
+    ~VulkanGraphicsSample() override {
         shutdown();
     }
 

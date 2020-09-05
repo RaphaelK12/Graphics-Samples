@@ -332,7 +332,7 @@ bool create_fence() {
  *   - create a descriptor heap and setup the render target views
  *   - create a fence object for CPU and GPU synchronization
  */
-bool initialize_d3d12(const HWND hwnd) {
+bool D3D12GraphicsSample::initialize(const HWND hwnd) {
     auto ret = enum_adapter();
     if (!ret)
         return false;
@@ -386,7 +386,7 @@ void backbuffer_state_transition(ID3D12GraphicsCommandList* command_list, ID3D12
 /*
  * Render a frame.
  */
-void render_frame() {
+void D3D12GraphicsSample::render_frame() {
     auto commandAllocator = g_command_list_allocators[g_current_back_buffer_index];
     auto backBuffer = g_back_buffers[g_current_back_buffer_index];
     auto commandList = g_command_list;
@@ -456,7 +456,7 @@ void render_frame() {
 /*
  * Shutdown d3d12, deallocate all resources we used in rendering.
  */
-void shutdown_d3d12() {
+void D3D12GraphicsSample::shutdown() {
     // flush the gpu command queue to make sure there is nothing to be read later.
     g_command_queue->Signal(g_fence.Get(), ++g_fence_value);
     if (g_fence->GetCompletedValue() < g_fence_value)

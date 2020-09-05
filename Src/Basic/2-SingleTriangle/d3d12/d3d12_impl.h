@@ -5,11 +5,29 @@
 
 #pragma once
 
-// initialize d3d12
-bool initialize_d3d12(const HWND hwnd);
+#include "../sample.h"
 
-// render a frame
-void render_frame();
+class D3D12GraphicsSample : public GraphicsSample {
+public:
+    /*
+     * Destroy everything d3d12 related.
+     */
+    ~D3D12GraphicsSample() override {
+        shutdown();
+    }
 
-// shutdown
-void shutdown_d3d12();
+    /*
+     * Initialize graphics API.
+     */
+    bool initialize(const HWND hwnd) override;
+
+    /*
+     * Render a frame.
+     */
+    void render_frame() override;
+
+    /*
+     * Shutdown the graphics API.
+     */
+    void shutdown() override;
+};
