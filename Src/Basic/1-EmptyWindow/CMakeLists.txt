@@ -14,6 +14,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_ROOT_DIR}/Bin")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_ROOT_DIR}/Bin/Release")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_ROOT_DIR}/Bin/Debug")
 
+# include directories
+include_directories( "${PROJECT_ROOT_DIR}/ThirdParty/VulkanSDK(1.2.148.0)/Include" )
+
+# library folder to link from
+link_directories( "${PROJECT_ROOT_DIR}/ThirdParty/VulkanSDK(1.2.148.0)/Lib" )
+
 macro(RemoveDebugCXXFlag flag)
     string(REPLACE "${flag}" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 endmacro()
@@ -33,7 +39,7 @@ endif()
 
 add_executable(EmptyWindow ${all_files})
 
-target_link_libraries( EmptyWindow "d3d12.lib" "dxgi.lib" "dxguid.lib" )
+target_link_libraries( EmptyWindow "d3d12.lib" "dxgi.lib" "dxguid.lib" "vulkan-1.lib" )
 
 # setup correct output name for different configurations
 set_target_properties( EmptyWindow PROPERTIES RELEASE_OUTPUT_NAME "1_empty_window_r" )

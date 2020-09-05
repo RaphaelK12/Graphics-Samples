@@ -17,6 +17,9 @@ set(CMAKE_RUNTIME_SHADER_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Resources/Sha
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_ROOT_DIR}/Bin/Release")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_ROOT_DIR}/Bin/Debug")
 
+# include directories
+include_directories( "${PROJECT_ROOT_DIR}/ThirdParty/VulkanSDK/Include" )
+
 macro(RemoveDebugCXXFlag flag)
     string(REPLACE "${flag}" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
 endmacro()
