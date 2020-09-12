@@ -16,6 +16,9 @@ if errorlevel 1 goto EOF
 if "%BUILD_RELEASE%" == "1" (
     echo [33mBuilding release[0m
 
+    :: create the resource folder since fxc will fail to write files in that folder
+    powershell New-Item -Force -ItemType directory -Path Bin/Resources
+
     powershell New-Item -Force -ItemType directory -Path Temp/Release
 	cd Temp/Release
 	cmake -A x64 ../..
@@ -31,6 +34,9 @@ if "%BUILD_RELEASE%" == "1" (
 
 if "%BUILD_DEBUG%" == "1" (
     echo [33mBuilding debug[0m
+
+    :: create the resource folder since fxc will fail to write files in that folder
+    powershell New-Item -Force -ItemType directory -Path Bin/Resources
 
     powershell New-Item -Force -ItemType directory -Path Temp/Debug
 	cd Temp/Debug
