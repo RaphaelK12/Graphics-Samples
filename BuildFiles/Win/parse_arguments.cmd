@@ -18,8 +18,8 @@ if NOT "%1" == "" (
         set BUILD_DEBUG=1
         goto EOF
     )else if "%1" == "update_dep" (
-        echo Downloading Dependencies
         set UPDATE_DEP=1
+        goto EOF
     )else (
         echo Unrecognized Command
         goto EOF
@@ -33,3 +33,4 @@ if NOT "%1" == "" (
 exit /b 0
 :ERR
 exit /b 1
+

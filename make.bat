@@ -37,17 +37,14 @@ if "%CLEAN%" == "1" (
     echo [33mCleaning all temporary file[0m
 	powershell Remove-Item -path ./Bin -recurse -ErrorAction Ignore
 	powershell Remove-Item -path ./Temp -recurse -ErrorAction Ignore
-	goto EOF
 )
 
 if "%UPDATE%" == "1" (
 	echo [33mSycning latest code[0m
 	git pull
-	goto EOF
 )
 
 if "%UPDATE_DEP%" == "1" (
 	echo [33mDownloading dependencies[0m
 	powershell .\BuildFiles\win\getdep.ps1
-	goto EOF
 )
