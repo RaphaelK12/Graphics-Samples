@@ -45,3 +45,9 @@ if "%UPDATE%" == "1" (
 	git pull
 	goto EOF
 )
+
+if "%UPDATE_DEP%" == "1" (
+	echo [33mDownloading dependencies[0m
+	powershell .\BuildFiles\win\getdep.ps1
+	goto EOF
+)
