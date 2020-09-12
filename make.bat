@@ -20,6 +20,12 @@ if "%BUILD_RELEASE%" == "1" (
 	cd Temp/Release
 	cmake -A x64 ../..
 	msbuild /p:Configuration=Release GraphicsSamples.sln
+
+	:: catch msbuild error
+	if ERRORLEVEL 1 ( 
+		goto BUILD_ERR
+	)
+
 	cd ../..
 )
 
@@ -30,6 +36,12 @@ if "%BUILD_DEBUG%" == "1" (
 	cd Temp/Debug
 	cmake -A x64 ../..
 	msbuild /p:Configuration=Debug GraphicsSamples.sln
+
+	:: catch msbuild error
+	if ERRORLEVEL 1 ( 
+		goto BUILD_ERR
+	)
+	
 	cd ../..
 )
 
@@ -49,5 +61,7 @@ if "%UPDATE_DEP%" == "1" (
 	powershell .\BuildFiles\win\getdep.ps1
 )
 
-if ERRORLEVEL 1 exit 1
-if ERRORLEVEL 0 exit 0
+:BUILD_SUCCEEED
+exit /b 0
+:BUILD_ERR
+exit /b 1
