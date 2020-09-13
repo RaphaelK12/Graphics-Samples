@@ -332,7 +332,7 @@ bool create_fence() {
  *   - create a descriptor heap and setup the render target views
  *   - create a fence object for CPU and GPU synchronization
  */
-bool D3D12GraphicsSample::initialize(const HWND hwnd) {
+bool D3D12GraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     auto ret = enum_adapter();
     if (!ret)
         return false;

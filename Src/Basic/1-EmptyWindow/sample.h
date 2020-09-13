@@ -17,7 +17,7 @@ public:
     /*
      * Initialize graphics API.
      */
-    virtual bool initialize(const HWND hwnd) = 0;
+    virtual bool initialize(const HINSTANCE hInstnace, const HWND hwnd) = 0;
 
     /*
      * Render a frame. 

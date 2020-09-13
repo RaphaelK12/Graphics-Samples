@@ -8,6 +8,12 @@
 #include "vulkan/vulkan.h"
 #include "vulkan_impl.h"
 
+// Vulkan properties
+std::vector<VkLayerProperties>  g_vk_properties;
+// Vulkan extensions
+std::vector<const char*>        g_vk_device_exts;
+// Vulkan instance extentions
+std::vector<const char*>        g_vk_instance_exts;
 // This is the vulkan instance
 VkInstance              g_instance;
 // vulkan device
@@ -16,8 +22,69 @@ VkDevice                g_device;
 VkCommandPool           g_commnad_pool;
 // vulkan command
 VkCommandBuffer         g_command;
+// swap chain surface
+VkSurfaceKHR            g_surface;
 
-bool VulkanGraphicsSample::initialize(const HWND hwnd) {
+typedef struct {
+    VkLayerProperties properties;
+    std::vector<VkExtensionProperties> instance_extensions;
+    std::vector<VkExtensionProperties> device_extensions;
+} layer_properties;
+
+static VkResult init_global_extension_properties(layer_properties& layer_props) {
+    VkExtensionProperties* instance_extensions;
+    uint32_t instance_extension_count;
+    VkResult res;
+    char* layer_name = NULL;
+
+    layer_name = layer_props.properties.layerName;
+
+    do {
+        res = vkEnumerateInstanceExtensionProperties(layer_name, &instance_extension_count, NULL);
+        if (res) return res;
+
+        if (instance_extension_count == 0) {
+            return VK_SUCCESS;
+        }
+
+        layer_props.instance_extensions.resize(instance_extension_count);
+        instance_extensions = layer_props.instance_extensions.data();
+        res = vkEnumerateInstanceExtensionProperties(layer_name, &instance_extension_count, instance_extensions);
+    } while (res == VK_INCOMPLETE);
+
+    return res;
+}
+
+bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
+    // initialize vulkan properties
+    VkResult res;
+    uint32_t instance_layer_count;
+    do {
+        res = vkEnumerateInstanceLayerProperties(&instance_layer_count, NULL);
+        if (res) return res;
+
+        if (instance_layer_count == 0) {
+            break;
+        }
+
+        std::vector<VkLayerProperties> tmp(instance_layer_count);
+        res = vkEnumerateInstanceLayerProperties(&instance_layer_count, tmp.data());
+
+        for (auto prop : tmp)
+            g_vk_properties.push_back(prop);
+    } while (res == VK_INCOMPLETE);
+
+    for (uint32_t i = 0; i < instance_layer_count; i++) {
+        layer_properties layer_props;
+        layer_props.properties = g_vk_properties[i];
+        res = init_global_extension_properties(layer_props);
+        if (res != VK_SUCCESS)
+            return false;
+    }
+
+    g_vk_instance_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    g_vk_instance_exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+
     VkApplicationInfo       app_info;
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;  // sType is mandatory
     app_info.pNext = NULL;                                // pNext is mandatory
@@ -31,13 +98,13 @@ bool VulkanGraphicsSample::initialize(const HWND hwnd) {
     instance_info.pNext = NULL;
     instance_info.flags = 0;
     instance_info.pApplicationInfo = &app_info;
-    instance_info.enabledExtensionCount = 0;
-    instance_info.ppEnabledExtensionNames = NULL;
+    instance_info.enabledExtensionCount = (uint32_t)g_vk_instance_exts.size();
+    instance_info.ppEnabledExtensionNames = g_vk_instance_exts.empty() ? nullptr : g_vk_instance_exts.data();
     instance_info.enabledLayerCount = 0;
     instance_info.ppEnabledLayerNames = NULL;
 
     // create the vulkan instance
-    VkResult res = vkCreateInstance(&instance_info, NULL, &g_instance);
+    res = vkCreateInstance(&instance_info, NULL, &g_instance);
     if (res != VK_SUCCESS) {
         MessageBox(NULL, L"Failed to create vulkan instance.", L"Error", MB_OK);
         return false;
@@ -92,13 +159,15 @@ bool VulkanGraphicsSample::initialize(const HWND hwnd) {
     queue_info.queueCount = 1;
     queue_info.pQueuePriorities = queue_priorities;
 
+    g_vk_device_exts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+
     VkDeviceCreateInfo device_info = {};
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device_info.pNext = NULL;
     device_info.queueCreateInfoCount = 1;
     device_info.pQueueCreateInfos = &queue_info;
-    device_info.enabledExtensionCount = 0;
-    device_info.ppEnabledExtensionNames = NULL;
+    device_info.enabledExtensionCount = (uint32_t)g_vk_device_exts.size();
+    device_info.ppEnabledExtensionNames = g_vk_device_exts.empty() ? nullptr : g_vk_device_exts.data();
     device_info.enabledLayerCount = 0;
     device_info.ppEnabledLayerNames = NULL;
     device_info.pEnabledFeatures = NULL;
@@ -130,6 +199,15 @@ bool VulkanGraphicsSample::initialize(const HWND hwnd) {
     cmd.commandBufferCount = 1;
 
     res = vkAllocateCommandBuffers(g_device, &cmd, &g_command);
+    if (res != VK_SUCCESS)
+        return false;
+
+    VkWin32SurfaceCreateInfoKHR createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    createInfo.pNext = NULL;
+    createInfo.hinstance = hInstnace;
+    createInfo.hwnd = hwnd;
+    res = vkCreateWin32SurfaceKHR(g_instance, &createInfo, NULL, &g_surface);
     if (res != VK_SUCCESS)
         return false;
 

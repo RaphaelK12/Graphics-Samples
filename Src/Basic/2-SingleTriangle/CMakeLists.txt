@@ -34,7 +34,7 @@ if(PLATFORM_WIN)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS")
 
     # Use unicode as default character set
-    ADD_DEFINITIONS(-DUNICODE)
+    ADD_DEFINITIONS(-DUNICODE -DVK_USE_PLATFORM_WIN32_KHR)
 
     # Somehow this will introduce an unresolved symbol error in debug mode.
     RemoveDebugCXXFlag("/RTC1")
