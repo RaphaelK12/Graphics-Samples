@@ -31,6 +31,22 @@ VkFormat                g_back_buffer_format;
 VkSwapchainKHR          g_swapchain;
 // swap chain image count
 uint32_t                g_swapchain_image_count;
+// render pass
+VkRenderPass            g_render_pass;
+// frame buffers
+std::vector<VkFramebuffer>  g_frame_buffers;
+// current buffer index
+uint32_t                g_current_buffer_index = 0;
+// current window size
+uint32_t                g_width = 0;
+uint32_t                g_height = 0;
+// fence
+VkFence                 g_draw_fence;
+// graphics queue and present queue
+VkQueue                 g_graphics_queue;
+VkQueue                 g_present_queue;
+// image acquire semaphore
+VkSemaphore             g_image_acquired_semaphore;
 
 typedef struct _swap_chain_buffers {
     VkImage image;
@@ -301,14 +317,15 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     if (res != VK_SUCCESS)
         return false;
 
+    // get the client size of the window
+    ::RECT rect;
+    ::GetWindowRect(hwnd, &rect);
+    g_width = rect.right - rect.left;
+    g_height = rect.bottom - rect.top;
+
     VkExtent2D swapchainExtent;
     // width and height are either both 0xFFFFFFFF, or both not 0xFFFFFFFF.
     if (surfCapabilities.currentExtent.width == 0xFFFFFFFF) {
-
-        // get the client size of the window
-        ::RECT rect;
-        ::GetWindowRect(hwnd, &rect);
-
         // If the surface size is undefined, the size is set to
         // the size of the images requested.
         swapchainExtent.width = rect.right - rect.left;
@@ -437,11 +454,165 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
             return false;
     }
 
+    /* Need attachments for render target and depth buffer */
+    VkAttachmentDescription attachments[2];
+    attachments[0].format = g_back_buffer_format;
+    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    attachments[0].flags = 0;
+
+    VkAttachmentReference color_reference = {};
+    color_reference.attachment = 0;
+    color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depth_reference = {};
+    depth_reference.attachment = 1;
+    depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.flags = 0;
+    subpass.inputAttachmentCount = 0;
+    subpass.pInputAttachments = NULL;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_reference;
+    subpass.pResolveAttachments = NULL;
+    subpass.pDepthStencilAttachment = NULL;
+    subpass.preserveAttachmentCount = 0;
+    subpass.pPreserveAttachments = NULL;
+
+    // Subpass dependency to wait for wsi image acquired semaphore before starting layout transition
+    VkSubpassDependency subpass_dependency = {};
+    subpass_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    subpass_dependency.dstSubpass = 0;
+    subpass_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    subpass_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    subpass_dependency.srcAccessMask = 0;
+    subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    subpass_dependency.dependencyFlags = 0;
+
+    VkRenderPassCreateInfo rp_info = {};
+    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rp_info.pNext = NULL;
+    rp_info.attachmentCount = 1;
+    rp_info.pAttachments = attachments;
+    rp_info.subpassCount = 1;
+    rp_info.pSubpasses = &subpass;
+    rp_info.dependencyCount = 1;
+    rp_info.pDependencies = &subpass_dependency;
+
+    res = vkCreateRenderPass(g_device, &rp_info, NULL, &g_render_pass);
+    if (res != VK_SUCCESS)
+        return false;
+
+    // Initialize frame buffers
+    VkImageView image_attachments[1];
+
+    VkFramebufferCreateInfo fb_info = {};
+    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fb_info.pNext = NULL;
+    fb_info.renderPass = g_render_pass;
+    fb_info.attachmentCount = 1;
+    fb_info.pAttachments = image_attachments;
+    fb_info.width = swapchainExtent.width;
+    fb_info.height = swapchainExtent.height;
+    fb_info.layers = 1;
+
+    g_frame_buffers.resize(g_swapchain_image_count);
+
+    for (uint32_t i = 0; i < g_swapchain_image_count; i++) {
+        image_attachments[0] = g_swapchain_buffers[i].view;
+        res = vkCreateFramebuffer(g_device, &fb_info, NULL, &g_frame_buffers[i]);
+        if (res != VK_SUCCESS)
+            return false;
+    }
+
+    vkGetDeviceQueue(g_device, graphics_queue_family_index, 0, &g_graphics_queue);
+    if (graphics_queue_family_index == present_queue_family_index)
+        g_present_queue = g_graphics_queue;
+    else
+        vkGetDeviceQueue(g_device, present_queue_family_index, 0, &g_present_queue);
+
+    VkFenceCreateInfo fenceInfo;
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.pNext = NULL;
+    fenceInfo.flags = 0;
+    vkCreateFence(g_device, &fenceInfo, NULL, &g_draw_fence);
+
+    VkSemaphoreCreateInfo imageAcquiredSemaphoreCreateInfo;
+    imageAcquiredSemaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    imageAcquiredSemaphoreCreateInfo.pNext = NULL;
+    imageAcquiredSemaphoreCreateInfo.flags = 0;
+
+    res = vkCreateSemaphore(g_device, &imageAcquiredSemaphoreCreateInfo, NULL, &g_image_acquired_semaphore);
+
     return true;
 }
 
 void VulkanGraphicsSample::render_frame() {
+    // Get the index of the next available swapchain image:
+    vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_acquired_semaphore, VK_NULL_HANDLE, &g_current_buffer_index);
 
+    VkClearValue clear_values[1];
+    clear_values[0].color.float32[0] = 250.2f;
+    clear_values[0].color.float32[1] = 0.2f;
+    clear_values[0].color.float32[2] = 0.2f;
+    clear_values[0].color.float32[3] = 0.2f;
+
+    VkRenderPassBeginInfo rp_begin;
+    rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin.pNext = NULL;
+    rp_begin.renderPass = g_render_pass;
+    rp_begin.framebuffer = g_frame_buffers[g_current_buffer_index];
+    rp_begin.renderArea.offset.x = 0;
+    rp_begin.renderArea.offset.y = 0;
+    rp_begin.renderArea.extent.width = g_width;
+    rp_begin.renderArea.extent.height = g_height;
+    rp_begin.clearValueCount = 1;
+    rp_begin.pClearValues = clear_values;
+
+    vkCmdBeginRenderPass(g_command, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(g_command);
+
+    const VkCommandBuffer cmd_bufs[] = { g_command };
+
+    VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submit_info[1] = {};
+    submit_info[0].pNext = NULL;
+    submit_info[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info[0].waitSemaphoreCount = 1;
+    submit_info[0].pWaitSemaphores = &g_image_acquired_semaphore;
+    submit_info[0].pWaitDstStageMask = &pipe_stage_flags;
+    submit_info[0].commandBufferCount = 1;
+    submit_info[0].pCommandBuffers = cmd_bufs;
+    submit_info[0].signalSemaphoreCount = 0;
+    submit_info[0].pSignalSemaphores = NULL;
+
+    /* Queue the command buffer for execution */
+    vkQueueSubmit(g_graphics_queue, 1, submit_info, g_draw_fence);
+
+    VkPresentInfoKHR present;
+    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present.pNext = NULL;
+    present.swapchainCount = 1;
+    present.pSwapchains = &g_swapchain;
+    present.pImageIndices = &g_current_buffer_index;
+    present.pWaitSemaphores = NULL;
+    present.waitSemaphoreCount = 0;
+    present.pResults = NULL;
+
+    /* Make sure command buffer is finished before presenting */
+    VkResult res;
+    do {
+        res = vkWaitForFences(g_device, 1, &g_draw_fence, VK_TRUE, 100000000);
+    } while (res == VK_TIMEOUT);
+
+    vkQueuePresentKHR(g_present_queue, &present);
 }
 
 void VulkanGraphicsSample::shutdown() {
