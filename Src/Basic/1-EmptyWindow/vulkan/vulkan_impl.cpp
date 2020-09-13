@@ -31,8 +31,6 @@ VkFormat                g_back_buffer_format;
 VkSwapchainKHR          g_swapchain;
 // swap chain image count
 uint32_t                g_swapchain_image_count;
-// render pass
-VkRenderPass            g_render_pass;
 // frame buffers
 std::vector<VkFramebuffer>  g_frame_buffers;
 // current buffer index
@@ -496,27 +494,13 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     subpass_dependency.dependencyFlags = 0;
 
-    VkRenderPassCreateInfo rp_info = {};
-    rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rp_info.pNext = NULL;
-    rp_info.attachmentCount = 1;
-    rp_info.pAttachments = attachments;
-    rp_info.subpassCount = 1;
-    rp_info.pSubpasses = &subpass;
-    rp_info.dependencyCount = 1;
-    rp_info.pDependencies = &subpass_dependency;
-
-    res = vkCreateRenderPass(g_device, &rp_info, NULL, &g_render_pass);
-    if (res != VK_SUCCESS)
-        return false;
-
     // Initialize frame buffers
     VkImageView image_attachments[1];
 
     VkFramebufferCreateInfo fb_info = {};
     fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     fb_info.pNext = NULL;
-    fb_info.renderPass = g_render_pass;
+    fb_info.renderPass = NULL;
     fb_info.attachmentCount = 1;
     fb_info.pAttachments = image_attachments;
     fb_info.width = swapchainExtent.width;
@@ -558,61 +542,61 @@ void VulkanGraphicsSample::render_frame() {
     // Get the index of the next available swapchain image:
     vkAcquireNextImageKHR(g_device, g_swapchain, UINT64_MAX, g_image_acquired_semaphore, VK_NULL_HANDLE, &g_current_buffer_index);
 
-    VkClearValue clear_values[1];
-    clear_values[0].color.float32[0] = 250.2f;
-    clear_values[0].color.float32[1] = 0.2f;
-    clear_values[0].color.float32[2] = 0.2f;
-    clear_values[0].color.float32[3] = 0.2f;
+    // generate the command list
+    {
+        VkCommandBufferBeginInfo beginInfo = {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
 
-    VkRenderPassBeginInfo rp_begin;
-    rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin.pNext = NULL;
-    rp_begin.renderPass = g_render_pass;
-    rp_begin.framebuffer = g_frame_buffers[g_current_buffer_index];
-    rp_begin.renderArea.offset.x = 0;
-    rp_begin.renderArea.offset.y = 0;
-    rp_begin.renderArea.extent.width = g_width;
-    rp_begin.renderArea.extent.height = g_height;
-    rp_begin.clearValueCount = 1;
-    rp_begin.pClearValues = clear_values;
+        vkBeginCommandBuffer(g_command, &beginInfo);
 
-    vkCmdBeginRenderPass(g_command, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdEndRenderPass(g_command);
+        VkImageSubresourceRange imageRange = {};
+        imageRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageRange.levelCount = 1;
+        imageRange.layerCount = 1;
 
-    const VkCommandBuffer cmd_bufs[] = { g_command };
+        static float g = 0.0f;
+        g += 0.05f;
+        VkClearColorValue clearColor = { 0.4f, 0.6f, sinf(g), 1.0f };
+        vkCmdClearColorImage(g_command, g_swapchain_buffers[g_current_buffer_index].image, VK_IMAGE_LAYOUT_GENERAL, &clearColor, 1, &imageRange);
 
-    VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submit_info[1] = {};
-    submit_info[0].pNext = NULL;
-    submit_info[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info[0].waitSemaphoreCount = 1;
-    submit_info[0].pWaitSemaphores = &g_image_acquired_semaphore;
-    submit_info[0].pWaitDstStageMask = &pipe_stage_flags;
-    submit_info[0].commandBufferCount = 1;
-    submit_info[0].pCommandBuffers = cmd_bufs;
-    submit_info[0].signalSemaphoreCount = 0;
-    submit_info[0].pSignalSemaphores = NULL;
+        vkEndCommandBuffer(g_command);
+    }
 
-    /* Queue the command buffer for execution */
-    vkQueueSubmit(g_graphics_queue, 1, submit_info, g_draw_fence);
+    // execute the command list
+    {
+        const VkCommandBuffer cmd_bufs[] = { g_command };
 
-    VkPresentInfoKHR present;
-    present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present.pNext = NULL;
-    present.swapchainCount = 1;
-    present.pSwapchains = &g_swapchain;
-    present.pImageIndices = &g_current_buffer_index;
-    present.pWaitSemaphores = NULL;
-    present.waitSemaphoreCount = 0;
-    present.pResults = NULL;
+        VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submit_info[1] = {};
+        submit_info[0].pNext = NULL;
+        submit_info[0].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info[0].waitSemaphoreCount = 1;
+        submit_info[0].pWaitSemaphores = &g_image_acquired_semaphore;
+        submit_info[0].pWaitDstStageMask = &pipe_stage_flags;
+        submit_info[0].commandBufferCount = 1;
+        submit_info[0].pCommandBuffers = cmd_bufs;
+        submit_info[0].signalSemaphoreCount = 0;
+        submit_info[0].pSignalSemaphores = NULL;
 
-    /* Make sure command buffer is finished before presenting */
-    VkResult res;
-    do {
-        res = vkWaitForFences(g_device, 1, &g_draw_fence, VK_TRUE, 100000000);
-    } while (res == VK_TIMEOUT);
+        /* Queue the command buffer for execution */
+        vkQueueSubmit(g_graphics_queue, 1, submit_info, g_draw_fence);
+    }
 
-    vkQueuePresentKHR(g_present_queue, &present);
+    // present the frame
+    {
+        VkPresentInfoKHR present;
+        present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present.pNext = NULL;
+        present.swapchainCount = 1;
+        present.pSwapchains = &g_swapchain;
+        present.pImageIndices = &g_current_buffer_index;
+        present.pWaitSemaphores = NULL;
+        present.waitSemaphoreCount = 0;
+        present.pResults = NULL;
+
+        vkQueuePresentKHR(g_present_queue, &present);
+    }
 }
 
 void VulkanGraphicsSample::shutdown() {
