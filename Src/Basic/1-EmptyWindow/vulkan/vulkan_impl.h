@@ -10,13 +10,6 @@
 class VulkanGraphicsSample : public GraphicsSample {
 public:
     /*
-     * Destroy everything vulkan related.
-     */
-    ~VulkanGraphicsSample() override {
-        shutdown();
-    }
-
-    /*
      * Initialize graphics API.
      */
     bool initialize(const HINSTANCE hInstnace, const HWND hwnd) override;

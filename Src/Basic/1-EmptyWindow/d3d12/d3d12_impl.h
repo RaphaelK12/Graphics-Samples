@@ -10,13 +10,6 @@
 class D3D12GraphicsSample : public GraphicsSample {
 public:
     /*
-     * Destroy everything d3d12 related.
-     */
-    ~D3D12GraphicsSample() override {
-        shutdown();
-    }
-
-    /*
      * Initialize graphics API.
      */
     bool initialize(const HINSTANCE hInstnace, const HWND hwnd) override;

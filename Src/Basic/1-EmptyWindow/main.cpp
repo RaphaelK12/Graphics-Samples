@@ -90,6 +90,8 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
         g_graphics_sample->render_frame();
     }
 
+    g_graphics_sample->shutdown();
+
     return 0;
 }
 

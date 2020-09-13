@@ -5,6 +5,7 @@
 
 #include <vector>
 #include <windows.h>
+#include <memory>
 #include "vulkan/vulkan.h"
 #include "vulkan_impl.h"
 
@@ -24,6 +25,19 @@ VkCommandPool           g_commnad_pool;
 VkCommandBuffer         g_command;
 // swap chain surface
 VkSurfaceKHR            g_surface;
+// back buffer format
+VkFormat                g_back_buffer_format;
+// the swap chain
+VkSwapchainKHR          g_swapchain;
+// swap chain image count
+uint32_t                g_swapchain_image_count;
+
+typedef struct _swap_chain_buffers {
+    VkImage image;
+    VkImageView view;
+} swap_chain_buffer;
+
+std::vector<swap_chain_buffer>       g_swapchain_buffers;
 
 typedef struct {
     VkLayerProperties properties;
@@ -211,6 +225,218 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     if (res != VK_SUCCESS)
         return false;
 
+    // Iterate over each queue to learn whether it supports presenting:
+    auto pSupportsPresent = std::make_unique<VkBool32[]>(queue_family_count);
+    for (uint32_t i = 0; i < queue_family_count; i++) {
+        vkGetPhysicalDeviceSurfaceSupportKHR(gpus[0], i, g_surface, &pSupportsPresent[i]);
+    }
+
+    // Search for a graphics and a present queue in the array of queue
+    // families, try to find one that supports both
+    auto graphics_queue_family_index = UINT32_MAX;
+    auto present_queue_family_index = UINT32_MAX;
+    for (uint32_t i = 0; i < queue_family_count; ++i) {
+        if ((queue_props[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+            if (graphics_queue_family_index == UINT32_MAX) 
+                graphics_queue_family_index = i;
+
+            if (pSupportsPresent[i] == VK_TRUE) {
+                graphics_queue_family_index = i;
+                present_queue_family_index = i;
+                break;
+            }
+        }
+    }
+
+    if (present_queue_family_index == UINT32_MAX) {
+        // If didn't find a queue that supports both graphics and present, then
+        // find a separate present queue.
+        for (size_t i = 0; i < queue_family_count; ++i)
+            if (pSupportsPresent[i] == VK_TRUE) {
+                present_queue_family_index = (unsigned int)i;
+                break;
+            }
+    }
+
+    // Generate error if could not find queues that support graphics and present
+    if (graphics_queue_family_index == UINT32_MAX || present_queue_family_index == UINT32_MAX) {
+        MessageBox(NULL, L"Could not find a queues for graphics and present.", L"Error", MB_OK);
+        return false;
+    }
+
+    // Get the list of VkFormats that are supported:
+    uint32_t formatCount;
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(gpus[0], g_surface, &formatCount, NULL);
+    if (res != VK_SUCCESS)
+        return false;
+    auto surfFormats = std::make_unique<VkSurfaceFormatKHR[]>(formatCount);
+    res = vkGetPhysicalDeviceSurfaceFormatsKHR(gpus[0], g_surface, &formatCount, surfFormats.get());
+    if (res != VK_SUCCESS)
+        return false;
+    // If the format list includes just one entry of VK_FORMAT_UNDEFINED,
+    // the surface has no preferred format.  Otherwise, at least one
+    // supported format will be returned.
+    if (formatCount == 1 && surfFormats[0].format == VK_FORMAT_UNDEFINED) {
+        g_back_buffer_format = VK_FORMAT_B8G8R8A8_UNORM;
+    }
+    else {
+        if (formatCount < 1)
+            return false;
+        g_back_buffer_format = surfFormats[0].format;
+    }
+    surfFormats = nullptr;
+
+    VkSurfaceCapabilitiesKHR surfCapabilities;
+    res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpus[0], g_surface, &surfCapabilities);
+    if (res != VK_SUCCESS)
+        return false;
+
+    uint32_t presentModeCount;
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(gpus[0], g_surface, &presentModeCount, NULL);
+    if (res != VK_SUCCESS)
+        return false;
+
+    auto presentModes = std::make_unique<VkPresentModeKHR[]>(presentModeCount);
+    res = vkGetPhysicalDeviceSurfacePresentModesKHR(gpus[0], g_surface, &presentModeCount, presentModes.get());
+    if (res != VK_SUCCESS)
+        return false;
+
+    VkExtent2D swapchainExtent;
+    // width and height are either both 0xFFFFFFFF, or both not 0xFFFFFFFF.
+    if (surfCapabilities.currentExtent.width == 0xFFFFFFFF) {
+
+        // get the client size of the window
+        ::RECT rect;
+        ::GetWindowRect(hwnd, &rect);
+
+        // If the surface size is undefined, the size is set to
+        // the size of the images requested.
+        swapchainExtent.width = rect.right - rect.left;
+        swapchainExtent.height = rect.bottom - rect.top;
+        if (swapchainExtent.width < surfCapabilities.minImageExtent.width) {
+            swapchainExtent.width = surfCapabilities.minImageExtent.width;
+        }
+        else if (swapchainExtent.width > surfCapabilities.maxImageExtent.width) {
+            swapchainExtent.width = surfCapabilities.maxImageExtent.width;
+        }
+
+        if (swapchainExtent.height < surfCapabilities.minImageExtent.height) {
+            swapchainExtent.height = surfCapabilities.minImageExtent.height;
+        }
+        else if (swapchainExtent.height > surfCapabilities.maxImageExtent.height) {
+            swapchainExtent.height = surfCapabilities.maxImageExtent.height;
+        }
+    }
+    else {
+        // If the surface size is defined, the swap chain size must match
+        swapchainExtent = surfCapabilities.currentExtent;
+    }
+
+    // The FIFO present mode is guaranteed by the spec to be supported
+    VkPresentModeKHR swapchainPresentMode = VK_PRESENT_MODE_FIFO_KHR;
+
+    // Determine the number of VkImage's to use in the swap chain.
+    // We need to acquire only 1 presentable image at at time.
+    // Asking for minImageCount images ensures that we can acquire
+    // 1 presentable image as long as we present it before attempting
+    // to acquire another.
+    uint32_t desiredNumberOfSwapChainImages = surfCapabilities.minImageCount;
+
+    VkSurfaceTransformFlagBitsKHR preTransform;
+    if (surfCapabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
+        preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    }
+    else {
+        preTransform = surfCapabilities.currentTransform;
+    }
+
+    // Find a supported composite alpha mode - one of these is guaranteed to be set
+    VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    VkCompositeAlphaFlagBitsKHR compositeAlphaFlags[4] = {
+        VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+        VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+    };
+    for (uint32_t i = 0; i < sizeof(compositeAlphaFlags) / sizeof(compositeAlphaFlags[0]); i++) {
+        if (surfCapabilities.supportedCompositeAlpha & compositeAlphaFlags[i]) {
+            compositeAlpha = compositeAlphaFlags[i];
+            break;
+        }
+    }
+
+    VkSwapchainCreateInfoKHR swapchain_ci = {};
+    swapchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_ci.pNext = NULL;
+    swapchain_ci.surface = g_surface;
+    swapchain_ci.minImageCount = desiredNumberOfSwapChainImages;
+    swapchain_ci.imageFormat = g_back_buffer_format;
+    swapchain_ci.imageExtent.width = swapchainExtent.width;
+    swapchain_ci.imageExtent.height = swapchainExtent.height;
+    swapchain_ci.preTransform = preTransform;
+    swapchain_ci.compositeAlpha = compositeAlpha;
+    swapchain_ci.imageArrayLayers = 1;
+    swapchain_ci.presentMode = swapchainPresentMode;
+    swapchain_ci.oldSwapchain = VK_NULL_HANDLE;
+    swapchain_ci.clipped = true;
+    swapchain_ci.imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
+    swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchain_ci.queueFamilyIndexCount = 0;
+    swapchain_ci.pQueueFamilyIndices = NULL;
+    uint32_t queueFamilyIndices[2] = { (uint32_t)graphics_queue_family_index, (uint32_t)present_queue_family_index };
+    if (graphics_queue_family_index != present_queue_family_index) {
+        // If the graphics and present queues are from different queue families,
+        // we either have to explicitly transfer ownership of images between
+        // the queues, or we have to create the swapchain with imageSharingMode
+        // as VK_SHARING_MODE_CONCURRENT
+        swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        swapchain_ci.queueFamilyIndexCount = 2;
+        swapchain_ci.pQueueFamilyIndices = queueFamilyIndices;
+    }
+
+    res = vkCreateSwapchainKHR(g_device, &swapchain_ci, NULL, &g_swapchain);
+    if (res != VK_SUCCESS)
+        return false;
+
+    res = vkGetSwapchainImagesKHR(g_device, g_swapchain, &g_swapchain_image_count, NULL);
+    if (res != VK_SUCCESS || g_swapchain_image_count == 0)
+        return false;
+
+    auto swapchainImages = std::make_unique<VkImage[]>(g_swapchain_image_count);
+    res = vkGetSwapchainImagesKHR(g_device, g_swapchain, &g_swapchain_image_count, swapchainImages.get());
+    if (res != VK_SUCCESS)
+        return false;
+
+    g_swapchain_buffers.resize(g_swapchain_image_count);
+    for (uint32_t i = 0; i < g_swapchain_image_count; i++) {
+        g_swapchain_buffers[i].image = swapchainImages[i];
+    }
+    swapchainImages = nullptr;
+
+    for (uint32_t i = 0; i < g_swapchain_image_count; i++) {
+        VkImageViewCreateInfo color_image_view = {};
+        color_image_view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        color_image_view.pNext = NULL;
+        color_image_view.flags = 0;
+        color_image_view.image = g_swapchain_buffers[i].image;
+        color_image_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        color_image_view.format = g_back_buffer_format;
+        color_image_view.components.r = VK_COMPONENT_SWIZZLE_R;
+        color_image_view.components.g = VK_COMPONENT_SWIZZLE_G;
+        color_image_view.components.b = VK_COMPONENT_SWIZZLE_B;
+        color_image_view.components.a = VK_COMPONENT_SWIZZLE_A;
+        color_image_view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        color_image_view.subresourceRange.baseMipLevel = 0;
+        color_image_view.subresourceRange.levelCount = 1;
+        color_image_view.subresourceRange.baseArrayLayer = 0;
+        color_image_view.subresourceRange.layerCount = 1;
+
+        res = vkCreateImageView(g_device, &color_image_view, NULL, &g_swapchain_buffers[i].view);
+        if (res != VK_SUCCESS)
+            return false;
+    }
+
     return true;
 }
 
@@ -219,6 +445,10 @@ void VulkanGraphicsSample::render_frame() {
 }
 
 void VulkanGraphicsSample::shutdown() {
+    for (uint32_t i = 0; i < g_swapchain_image_count; i++)
+        vkDestroyImageView(g_device, g_swapchain_buffers[i].view, NULL);
+    vkDestroySwapchainKHR(g_device, g_swapchain, NULL);
+
     // destroy command list and command pool
     VkCommandBuffer cmd_bufs[1] = { g_command };
     vkFreeCommandBuffers(g_device, g_commnad_pool, 1, cmd_bufs);
