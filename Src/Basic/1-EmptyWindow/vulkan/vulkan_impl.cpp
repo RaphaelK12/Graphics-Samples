@@ -9,12 +9,37 @@
 #include "vulkan/vulkan.h"
 #include "vulkan_impl.h"
 
-// Vulkan properties
-std::vector<VkLayerProperties>  g_vk_properties;
+#define VULKAN_HPP_NO_EXCEPTIONS
+#define VULKAN_HPP_TYPESAFE_CONVERSION
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vk_sdk_platform.h>
+
+#define VERIFY(ret)         if(ret != vk::Result::eSuccess) return false;
+
+// Instance validation layer
+static char const* const                        g_instance_validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
+// Vulkan layer count
+uint32_t                                        g_enabled_layer_count = 0;
 // Vulkan extensions
-std::vector<const char*>        g_vk_device_exts;
-// Vulkan instance extentions
-std::vector<const char*>        g_vk_instance_exts;
+std::vector<const char*>                        g_vk_device_exts;
+// Vulkan instance extensions
+std::vector<const char*>                        g_vk_instance_exts;
+// Vulkan instance
+vk::Instance                                    g_vk_instance;
+// Vulkan compatible GPUs
+vk::PhysicalDevice                              g_vk_physical_device;
+// Vulkan queue family count
+uint32_t                                        g_vk_queue_family_count;
+// Vulkan queue properties
+std::unique_ptr<vk::QueueFamilyProperties[]>    g_vk_queue_properties;
+// swap chain surface
+vk::SurfaceKHR                                  g_vk_surface;
+// graphics queue and present queue
+vk::Queue                                       g_vk_graphics_queue;
+vk::Queue                                       g_vk_present_queue;
+// vulkan device
+vk::Device                                      g_vk_device;
+
 // This is the vulkan instance
 VkInstance              g_instance;
 // vulkan device
@@ -83,35 +108,242 @@ static VkResult init_global_extension_properties(layer_properties& layer_props) 
     return res;
 }
 
-bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
-    // initialize vulkan properties
-    VkResult res;
-    uint32_t instance_layer_count;
-    do {
-        res = vkEnumerateInstanceLayerProperties(&instance_layer_count, NULL);
-        if (res) return res;
+static bool check_layers(uint32_t check_count, char const* const* const check_names, uint32_t layer_count, vk::LayerProperties* layers) {
+    for (uint32_t i = 0; i < check_count; i++) {
+        bool found = false;
+        for (uint32_t j = 0; j < layer_count; j++) {
+            if (!strcmp(check_names[i], layers[j].layerName)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            fprintf(stderr, "Cannot find layer: %s\n", check_names[i]);
+            return false;
+        }
+    }
+    return true;
+}
 
-        if (instance_layer_count == 0) {
-            break;
+static bool create_vk_instance() {
+    // validate layer count
+    {
+        uint32_t instance_extension_count = 0;
+        uint32_t instance_layer_count = 0;
+        auto result = vk::enumerateInstanceLayerProperties(&instance_layer_count, static_cast<vk::LayerProperties*>(nullptr));
+        VERIFY(result);
+
+        if (instance_layer_count > 0) {
+            std::unique_ptr<vk::LayerProperties[]> instance_layers(new vk::LayerProperties[instance_layer_count]);
+            result = vk::enumerateInstanceLayerProperties(&instance_layer_count, instance_layers.get());
+            VERIFY(result);
+
+            const bool validation_found = check_layers(_countof(g_instance_validation_layers), g_instance_validation_layers, instance_layer_count, instance_layers.get());
+            if (!validation_found)
+                return false;
+        }
+    }
+
+    // get vulkan properties
+    {
+        bool surface_ext_found = false, platform_surface_ext_found = false;
+
+        // get the number of instance extension properties
+        uint32_t    instance_extension_count = 0;
+        auto result = vk::enumerateInstanceExtensionProperties(nullptr, &instance_extension_count, static_cast<vk::ExtensionProperties*>(nullptr));
+
+        if (instance_extension_count > 0) {
+            auto instance_extensions = std::make_unique<vk::ExtensionProperties[]>(instance_extension_count);
+            result = vk::enumerateInstanceExtensionProperties(nullptr, &instance_extension_count, instance_extensions.get());
+            VERIFY(result);
+
+            for (uint32_t i = 0; i < instance_extension_count; i++) {
+                if (!strcmp(VK_KHR_SURFACE_EXTENSION_NAME, instance_extensions[i].extensionName)) {
+                    surface_ext_found = 1;
+                    g_vk_instance_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+                }
+
+                if (!strcmp(VK_KHR_WIN32_SURFACE_EXTENSION_NAME, instance_extensions[i].extensionName)) {
+                    platform_surface_ext_found = 1;
+                    g_vk_instance_exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+                }
+            }
         }
 
-        std::vector<VkLayerProperties> tmp(instance_layer_count);
-        res = vkEnumerateInstanceLayerProperties(&instance_layer_count, tmp.data());
-
-        for (auto prop : tmp)
-            g_vk_properties.push_back(prop);
-    } while (res == VK_INCOMPLETE);
-
-    for (uint32_t i = 0; i < instance_layer_count; i++) {
-        layer_properties layer_props;
-        layer_props.properties = g_vk_properties[i];
-        res = init_global_extension_properties(layer_props);
-        if (res != VK_SUCCESS)
+        // if one of them is not found, it can't run vulkan
+        if (!surface_ext_found || !platform_surface_ext_found)
             return false;
     }
 
-    g_vk_instance_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
-    g_vk_instance_exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+    // create the vulkan instance
+    {
+        auto const app = vk::ApplicationInfo()
+            .setPApplicationName("1 - EmptyWindow")
+            .setApplicationVersion(0)
+            .setPEngineName("1 - EmptyWindow")
+            .setEngineVersion(0)
+            .setApiVersion(VK_API_VERSION_1_0);
+        auto const inst_info = vk::InstanceCreateInfo()
+            .setPApplicationInfo(&app)
+            .setEnabledLayerCount(g_enabled_layer_count)
+            .setPpEnabledLayerNames(g_instance_validation_layers)
+            .setEnabledExtensionCount((uint32_t)g_vk_instance_exts.size())
+            .setPpEnabledExtensionNames(g_vk_instance_exts.data());
+
+        auto result = vk::createInstance(&inst_info, nullptr, &g_vk_instance);
+        VERIFY(result);
+    }
+
+    return true;
+}
+
+static bool create_vk_physical_device() {
+    // initialize physical device
+    {
+        /* Make initial call to query gpu_count, then second call for gpu info*/
+        uint32_t gpu_count;
+        auto result = g_vk_instance.enumeratePhysicalDevices(&gpu_count, static_cast<vk::PhysicalDevice*>(nullptr));
+        VERIFY(result);
+        if (gpu_count == 0)
+            return false;
+
+        auto physical_devices = std::make_unique<vk::PhysicalDevice[]>(gpu_count);
+        result = g_vk_instance.enumeratePhysicalDevices(&gpu_count, physical_devices.get());
+        VERIFY(result);
+
+        // just pick the first compatible device for now
+        g_vk_physical_device = physical_devices[0];
+    }
+
+    {
+        /* Look for device extensions */
+        uint32_t device_extension_count = 0;
+        bool swapchain_ext_found = false;
+
+        auto result = g_vk_physical_device.enumerateDeviceExtensionProperties(nullptr, &device_extension_count, static_cast<vk::ExtensionProperties*>(nullptr));
+        VERIFY(result);
+
+        if (device_extension_count > 0) {
+            auto device_exts = std::make_unique<vk::ExtensionProperties[]>(device_extension_count);
+            result = g_vk_physical_device.enumerateDeviceExtensionProperties(nullptr, &device_extension_count, device_exts.get());
+            VERIFY(result);
+
+            for (uint32_t i = 0; i < device_extension_count; i++) {
+                if (!strcmp(VK_KHR_SWAPCHAIN_EXTENSION_NAME, device_exts[i].extensionName)) {
+                    swapchain_ext_found = 1;
+                    g_vk_device_exts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+                }
+            }
+        }
+
+        if (!swapchain_ext_found)
+            return false;
+    }
+
+    g_vk_physical_device.getQueueFamilyProperties(&g_vk_queue_family_count, static_cast<vk::QueueFamilyProperties*>(nullptr));
+
+    g_vk_queue_properties = std::make_unique<vk::QueueFamilyProperties[]>(g_vk_queue_family_count);
+    g_vk_physical_device.getQueueFamilyProperties(&g_vk_queue_family_count, g_vk_queue_properties.get());
+
+    return true;
+}
+
+static bool create_surface(const HINSTANCE hInstnace, const HWND hwnd) {
+    auto const createInfo = vk::Win32SurfaceCreateInfoKHR().setHinstance(hInstnace).setHwnd(hwnd);
+
+    auto result = g_vk_instance.createWin32SurfaceKHR(&createInfo, nullptr, &g_vk_surface);
+    VERIFY(result);
+
+    return true;
+}
+
+static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
+    if (!create_surface(hInstnace, hwnd))
+        return false;
+
+    // Iterate over each queue to learn whether it supports presenting:
+    auto supportsPresent = std::make_unique<vk::Bool32[]>(g_vk_queue_family_count);
+    for (uint32_t i = 0; i < g_vk_queue_family_count; i++) {
+        g_vk_physical_device.getSurfaceSupportKHR(i, g_surface, &supportsPresent[i]);
+    }
+
+    uint32_t graphics_queue_family_index = UINT32_MAX;
+    uint32_t present_queue_family_index = UINT32_MAX;
+    for (uint32_t i = 0; i < g_vk_queue_family_count; i++) {
+        if (g_vk_queue_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+            if (graphics_queue_family_index == UINT32_MAX) {
+                graphics_queue_family_index = i;
+            }
+
+            if (supportsPresent[i] == VK_TRUE) {
+                present_queue_family_index = i;
+                present_queue_family_index = i;
+                break;
+            }
+        }
+    }
+
+    if (present_queue_family_index == UINT32_MAX) {
+        // If didn't find a queue that supports both graphics and present, then find a separate present queue.
+        for (uint32_t i = 0; i < g_vk_queue_family_count; ++i) {
+            if (supportsPresent[i] == VK_TRUE) {
+                present_queue_family_index = i;
+                break;
+            }
+        }
+    }
+
+    // Generate error if could not find both a graphics and a present queue
+    if (graphics_queue_family_index == UINT32_MAX || present_queue_family_index == UINT32_MAX)
+        return false;
+
+    // Create vulkan device
+    {
+        float const priorities[1] = { 0.0 };
+
+        vk::DeviceQueueCreateInfo queues[2];
+        queues[0].setQueueFamilyIndex(graphics_queue_family_index);
+        queues[0].setQueueCount(1);
+        queues[0].setPQueuePriorities(priorities);
+
+        auto deviceInfo = vk::DeviceCreateInfo()
+            .setQueueCreateInfoCount(1)
+            .setPQueueCreateInfos(queues)
+            .setEnabledLayerCount(0)
+            .setPpEnabledLayerNames(nullptr)
+            .setEnabledExtensionCount((uint32_t)g_vk_device_exts.size())
+            .setPpEnabledExtensionNames((const char* const*)g_vk_device_exts.data())
+            .setPEnabledFeatures(nullptr);
+
+        if (graphics_queue_family_index != present_queue_family_index) {
+            queues[1].setQueueFamilyIndex(present_queue_family_index);
+            queues[1].setQueueCount(1);
+            queues[1].setPQueuePriorities(priorities);
+            deviceInfo.setQueueCreateInfoCount(2);
+        }
+
+        auto result = g_vk_physical_device.createDevice(&deviceInfo, nullptr, &g_vk_device);
+        VERIFY(result);
+    }
+
+    g_vk_device.getQueue(graphics_queue_family_index, 0, &g_vk_graphics_queue);
+    g_vk_device.getQueue(present_queue_family_index, 0, &g_vk_present_queue);
+
+    return true;
+}
+
+bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
+    // initialize vulkan instance
+    if (!create_vk_instance())
+        return false;
+
+    // initialize vulkan device
+    if (!create_vk_physical_device())
+        return false;
+
+    // create surface
+    if (!create_surface(hInstnace, hwnd))
+        return false;
 
     VkApplicationInfo       app_info;
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;  // sType is mandatory
@@ -132,7 +364,7 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     instance_info.ppEnabledLayerNames = NULL;
 
     // create the vulkan instance
-    res = vkCreateInstance(&instance_info, NULL, &g_instance);
+    auto res = vkCreateInstance(&instance_info, NULL, &g_instance);
     if (res != VK_SUCCESS) {
         MessageBox(NULL, L"Failed to create vulkan instance.", L"Error", MB_OK);
         return false;
@@ -186,8 +418,6 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     queue_info.pNext = NULL;
     queue_info.queueCount = 1;
     queue_info.pQueuePriorities = queue_priorities;
-
-    g_vk_device_exts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
     VkDeviceCreateInfo device_info = {};
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
