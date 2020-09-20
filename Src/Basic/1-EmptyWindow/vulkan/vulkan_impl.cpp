@@ -437,6 +437,7 @@ static bool acquire_vk_images() {
     return true;
 }
 
+
 /*
  * Create sychronization objects.
  */

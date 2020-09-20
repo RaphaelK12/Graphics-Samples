@@ -9,11 +9,18 @@ file(GLOB_RECURSE project_vs_shader vs.hlsl)
 file(GLOB_RECURSE project_ps_shader ps.hlsl)
 set(project_shaders ${project_vs_shader} ${project_ps_shader})
 
-set(all_files ${project_headers} ${project_cpps} ${project_shaders})
+set(generated_src ${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/generated_vs.h ${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/generated_ps.h)
+
+# The header files won't be generated until compiling, this is just a workaround to indicate CMake that these files will be generated.
+# Ideally, if there is a way to locate fxc, I can also generate the header file here, which is a lot better.
+add_custom_command( OUTPUT ${generated_src}
+                    COMMAND echo ""
+                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/)
+
+set(all_files ${project_headers} ${project_cpps} ${project_shaders} ${generated_src})
 source_group_by_dir(all_files)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_ROOT_DIR}/Bin")
-set(CMAKE_RUNTIME_SHADER_FOLDER "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Resources/Shaders")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_ROOT_DIR}/Bin/Release")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_ROOT_DIR}/Bin/Debug")
 
@@ -56,8 +63,10 @@ set_property(SOURCE ${project_shaders}      PROPERTY VS_SHADER_ENTRYPOINT   main
 set_property(SOURCE ${project_shaders}      PROPERTY VS_SHADER_MODEL        5.1)
 set_property(SOURCE ${project_vs_shader}    PROPERTY VS_SHADER_TYPE         Vertex)
 set_property(SOURCE ${project_ps_shader}    PROPERTY VS_SHADER_TYPE         Pixel)
-set_property(SOURCE ${project_vs_shader}    PROPERTY VS_SHADER_OBJECT_FILE_NAME     "${CMAKE_RUNTIME_SHADER_FOLDER}/vso_1_single_triangle.cso")
-set_property(SOURCE ${project_ps_shader}    PROPERTY VS_SHADER_OBJECT_FILE_NAME     "${CMAKE_RUNTIME_SHADER_FOLDER}/pso_1_single_triangle.cso")
+set_property(SOURCE ${project_vs_shader}    PROPERTY VS_SHADER_OUTPUT_HEADER_FILE     "${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/generated_vs.h")
+set_property(SOURCE ${project_vs_shader}    PROPERTY VS_SHADER_VARIABLE_NAME          "g_shader_vs")
+set_property(SOURCE ${project_ps_shader}    PROPERTY VS_SHADER_OUTPUT_HEADER_FILE     "${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/generated_ps.h")
+set_property(SOURCE ${project_ps_shader}    PROPERTY VS_SHADER_VARIABLE_NAME          "g_shader_ps")
 
 # setup project folder
 set_target_properties( SingleTriangle PROPERTIES FOLDER BasicSamples)

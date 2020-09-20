@@ -39,3 +39,6 @@ Bin
 
 # Dependencies folder
 Dependencies
+
+# Generated files
+generated_*.h

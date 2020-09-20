@@ -8,6 +8,8 @@
 #include <d3d12.h>
 #include <math.h>
 #include <d3dcompiler.h>
+#include "shaders/generated_ps.h"
+#include "shaders/generated_vs.h"
 #include "d3d12_impl.h"
 
 /*
@@ -497,19 +499,10 @@ bool create_geomtry_data() {
  * Create pipeline state objects
  */
 bool create_pso() {
-    // Load the compiled shader blobs first.
-    ComPtr<ID3DBlob> vertex_shader_blob, pixel_shader_blob;
-    auto ret = D3DReadFileToBlob(L"../Resources/Shaders/vso_1_single_triangle.cso", &vertex_shader_blob);
-    if (FAILED(ret))
-        return false;
-    ret = D3DReadFileToBlob(L"../Resources/Shaders/pso_1_single_triangle.cso", &pixel_shader_blob);
-    if (FAILED(ret))
-        return false;
-
     // This tutorial is simple enough that no root-signature is needed
     D3D12_ROOT_SIGNATURE_DESC rootSig = { 0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT };
     ComPtr<ID3DBlob> blob_sig, blob_errors;
-    ret = D3D12SerializeRootSignature(&rootSig, D3D_ROOT_SIGNATURE_VERSION_1, &blob_sig, &blob_errors);
+    auto ret = D3D12SerializeRootSignature(&rootSig, D3D_ROOT_SIGNATURE_VERSION_1, &blob_sig, &blob_errors);
     if (FAILED(ret))
         return false;
     ret = g_d3d12_device->CreateRootSignature(0, blob_sig->GetBufferPointer(), blob_sig->GetBufferSize(), __uuidof(ID3D12RootSignature), (void**)&g_root_signature);
@@ -526,10 +519,10 @@ bool create_pso() {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC psod;
     memset(&psod, 0, sizeof(psod));
     psod.pRootSignature = g_root_signature.Get();
-    psod.VS.BytecodeLength = vertex_shader_blob->GetBufferSize();
-    psod.VS.pShaderBytecode = vertex_shader_blob->GetBufferPointer();
-    psod.PS.BytecodeLength = pixel_shader_blob->GetBufferSize();
-    psod.PS.pShaderBytecode = pixel_shader_blob->GetBufferPointer();
+    psod.VS.BytecodeLength = sizeof(g_shader_vs);
+    psod.VS.pShaderBytecode = g_shader_vs;
+    psod.PS.BytecodeLength = sizeof(g_shader_ps);
+    psod.PS.pShaderBytecode = g_shader_ps;
     psod.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
     psod.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     psod.RasterizerState.FrontCounterClockwise = true;
