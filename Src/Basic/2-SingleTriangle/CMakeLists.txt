@@ -14,7 +14,7 @@ set(generated_src ${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/generated_vs.h ${CMA
 # The header files won't be generated until compiling, this is just a workaround to indicate CMake that these files will be generated.
 # Ideally, if there is a way to locate fxc, I can also generate the header file here, which is a lot better.
 add_custom_command( OUTPUT ${generated_src}
-                    COMMAND echo ""
+                    COMMAND call >> generated_vs.h | call >> generated_ps.h
                     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/d3d12/shaders/)
 
 set(all_files ${project_headers} ${project_cpps} ${project_shaders} ${generated_src})
