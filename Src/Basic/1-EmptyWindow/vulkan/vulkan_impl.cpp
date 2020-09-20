@@ -613,9 +613,6 @@ void VulkanGraphicsSample::render_frame() {
     {
         auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
 
-        static float g = 0.0f;
-        g += 0.05f;
-
         g_vk_graphics_cmd[g_frame_index].reset((vk::CommandBufferResetFlags)0);
 
         auto result = g_vk_graphics_cmd[g_frame_index].begin(&commandInfo);
@@ -629,7 +626,7 @@ void VulkanGraphicsSample::render_frame() {
 
         // clear the back buffer
         g_vk_graphics_cmd[g_frame_index].clearColorImage( g_vk_images[g_frame_index], vk::ImageLayout::eTransferDstOptimal,
-                                                        vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, sinf(g), 1.0f} })),
+                                                        vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, 1.0f, 1.0f} })),
                                                         vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
         image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);

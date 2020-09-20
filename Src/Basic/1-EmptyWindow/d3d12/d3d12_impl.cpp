@@ -6,7 +6,6 @@
 #include <wrl.h>
 #include <dxgi1_6.h>
 #include <d3d12.h>
-#include <math.h>
 #include "d3d12_impl.h"
 
 /*
@@ -424,9 +423,7 @@ void D3D12GraphicsSample::render_frame() {
 
     // simply clear the back buffer
     {
-        static float g = 0.0f;
-        g += 0.05f;
-        FLOAT clearColor[] = { 0.4f, 0.6f, sinf(g), 1.0f };
+        FLOAT clearColor[] = { 0.4f, 0.6f, 1.0f, 1.0f };
         D3D12_CPU_DESCRIPTOR_HANDLE rtv;
         rtv.ptr = g_descriptor_heap->GetCPUDescriptorHandleForHeapStart().ptr + g_current_back_buffer_index * g_rtv_size;
         commandList->ClearRenderTargetView(rtv, clearColor, 0, nullptr);
