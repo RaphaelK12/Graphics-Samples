@@ -21,9 +21,9 @@
 // Vulkan instance
 vk::Instance                                    g_vk_instance;
 // Vulkan compatible GPUs
+// This will be implicitly destroyed after VkInstance is destroyed, so there is no need to explicitly destroy this variable.
+// https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Physical_devices_and_queue_families
 vk::PhysicalDevice                              g_vk_physical_device;
-// Vulkan queue properties
-std::unique_ptr<vk::QueueFamilyProperties[]>    g_vk_queue_properties;
 // swap chain surface
 vk::SurfaceKHR                                  g_vk_surface;
 // graphics queue and present queue
@@ -55,9 +55,6 @@ vk::SwapchainKHR                                g_vk_swapchain;
 vk::CommandPool                                 g_vk_graphics_cmd_pool;
 vk::CommandPool                                 g_vk_present_cmd_pool;
 
-
-// Vulkan queue family count
-uint32_t                                        g_queue_family_count;
 // Vulkan layer count
 uint32_t                                        g_enabled_layer_count = 0;
 // Vulkan extensions
@@ -212,49 +209,45 @@ static bool create_vk_physical_device() {
             return false;
     }
 
-    g_vk_physical_device.getQueueFamilyProperties(&g_queue_family_count, static_cast<vk::QueueFamilyProperties*>(nullptr));
-
-    g_vk_queue_properties = std::make_unique<vk::QueueFamilyProperties[]>(g_queue_family_count);
-    g_vk_physical_device.getQueueFamilyProperties(&g_queue_family_count, g_vk_queue_properties.get());
-
-    return true;
-}
-
-static bool create_surface(const HINSTANCE hInstnace, const HWND hwnd) {
-    auto const createInfo = vk::Win32SurfaceCreateInfoKHR().setHinstance(hInstnace).setHwnd(hwnd);
-
-    auto result = g_vk_instance.createWin32SurfaceKHR(&createInfo, nullptr, &g_vk_surface);
-    VERIFY(result);
-
     return true;
 }
 
 static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
-    if (!create_surface(hInstnace, hwnd))
-        return false;
+    // Create vulkan surface
+    auto const createInfo = vk::Win32SurfaceCreateInfoKHR().setHinstance(hInstnace).setHwnd(hwnd);
+    auto result = g_vk_instance.createWin32SurfaceKHR(&createInfo, nullptr, &g_vk_surface);
+    VERIFY(result);
+
+    // Graphics hardware may have multiple type of queues, this will keep track of how many type of queues are available on the graphics card.
+    uint32_t queue_family_count = 0;
+    g_vk_physical_device.getQueueFamilyProperties(&queue_family_count, static_cast<vk::QueueFamilyProperties*>(nullptr));
+
+    // Get all queues' properties
+    auto vk_queue_properties = std::make_unique<vk::QueueFamilyProperties[]>(queue_family_count);
+    g_vk_physical_device.getQueueFamilyProperties(&queue_family_count, vk_queue_properties.get());
 
     // Iterate over each queue to learn whether it supports presenting:
-    auto supportsPresent = std::make_unique<vk::Bool32[]>(g_queue_family_count);
-    for (uint32_t i = 0; i < g_queue_family_count; i++)
+    auto supportsPresent = std::make_unique<vk::Bool32[]>(queue_family_count);
+    for (uint32_t i = 0; i < queue_family_count; i++)
         g_vk_physical_device.getSurfaceSupportKHR(i, g_vk_surface, &supportsPresent[i]);
 
-    for (uint32_t i = 0; i < g_queue_family_count; i++) {
-        if (g_vk_queue_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+    // Pick a graphics queue and set the present queue too if the graphics queue also supports present
+    for (uint32_t i = 0; i < queue_family_count; i++) {
+        if (vk_queue_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
             if (g_graphics_queue_family_index == UINT32_MAX) {
                 g_graphics_queue_family_index = i;
             }
 
             if (supportsPresent[i] == VK_TRUE) {
                 g_present_queue_family_index = i;
-                g_present_queue_family_index = i;
                 break;
             }
         }
     }
 
+    // The graphics queue doesn't support present, we need to use a separate queue to present.
     if (g_present_queue_family_index == UINT32_MAX) {
-        // If didn't find a queue that supports both graphics and present, then find a separate present queue.
-        for (uint32_t i = 0; i < g_queue_family_count; ++i) {
+        for (uint32_t i = 0; i < queue_family_count; ++i) {
             if (supportsPresent[i] == VK_TRUE) {
                 g_present_queue_family_index = i;
                 break;
@@ -266,6 +259,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     if (g_graphics_queue_family_index == UINT32_MAX || g_present_queue_family_index == UINT32_MAX)
         return false;
 
+    // Whether we are using separate command queues for graphics and presenting
     g_separate_queue = g_graphics_queue_family_index != g_present_queue_family_index;
 
     // Create vulkan device
@@ -302,7 +296,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
 
     // Get the list of VkFormat's that are supported:
     uint32_t format_count;
-    auto result = g_vk_physical_device.getSurfaceFormatsKHR(g_vk_surface, &format_count, static_cast<vk::SurfaceFormatKHR*>(nullptr));
+    result = g_vk_physical_device.getSurfaceFormatsKHR(g_vk_surface, &format_count, static_cast<vk::SurfaceFormatKHR*>(nullptr));
     VERIFY(result);
 
     auto surface_format = std::make_unique<vk::SurfaceFormatKHR[]>(format_count);
@@ -469,6 +463,7 @@ static bool create_command() {
             .setLevel(vk::CommandBufferLevel::ePrimary)
             .setCommandBufferCount(1);
 
+        g_vk_present_cmd.resize(g_swapchain_image_cnt);
         for (uint32_t i = 0; i < g_swapchain_image_cnt; i++) {
             result = g_vk_device.allocateCommandBuffers(&present_cmd, &g_vk_present_cmd[i]);
             VERIFY(result);
@@ -605,6 +600,8 @@ void VulkanGraphicsSample::render_frame() {
 
     result = g_vk_present_queue.presentKHR(&presentInfo);
     assert(result == vk::Result::eSuccess);
+
+    g_vk_device.waitForFences(1, &g_vk_fence[g_frame_index], VK_TRUE, UINT64_MAX);
 
     g_frame_index += 1;
     g_frame_index %= FRAME_LAG;
