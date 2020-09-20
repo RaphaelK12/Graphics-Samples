@@ -13,58 +13,99 @@
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vk_sdk_platform.h>
 
+// This tutorial demonstrates how to initialize Vulkan and clear the back buffer every frame.
+//
+// Followings are the basic steps to initialize a Vulkan application.
+//    - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
+//    - Create Vulkan instance
+//    - Enumerate vulkan physical devices and use the first one
+//    - Create Vulkan surface
+//    - Enumerate all available queues and pick a graphics queue and present queue
+//      - Graphics queue can be different with present queue in this demo
+//    - Create Vulkan swapchain
+//      - Get all vulkan images in the swapchain
+//    - Create command pool and command buffers
+//      - May need separate command pool and buffers for present operations if a separate present queue is used.
+//
+// Apart from its initialization, this tutorial also demonstrate the following things
+//    - How to properly sycnronize cpu and gpu with vulkan fences.
+//    - Acquiring image from swapchain.
+//    - Generating a command buffer.
+//    - Clearing an image.
+//    - Present a frame.
+//    - Proper transition of an image.
+
+
 // Allow a maximum of two outstanding presentation operations.
 #define FRAME_LAG 2
 
 #define VERIFY(ret)         if(ret != vk::Result::eSuccess) return false;
 
 // Vulkan instance
+// A vulkan application should have one vulkan instance. Vulkan instance is used to create vulkan surface and physical devices.
 vk::Instance                                    g_vk_instance;
 // Vulkan compatible GPUs
 // This will be implicitly destroyed after VkInstance is destroyed, so there is no need to explicitly destroy this variable.
 // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Physical_devices_and_queue_families
 vk::PhysicalDevice                              g_vk_physical_device;
-// swap chain surface
+// Vulkan swapchain surface
 vk::SurfaceKHR                                  g_vk_surface;
-// graphics queue and present queue
+// Vulkan graphics queue and present queue
+// Most of the time graphics queue will have present feature, meaning it is almost true all the time this tutorial won't use separate
+// queues for graphics and presenting. As a matter of fact, on GCN hardware, there is no dedicated present queue hardware unit at all.
+// Engines, like UE4, don't handle separate present command queue.
+// However, there is no gurrantee that future hardware won't have a present queue. Since this is in Vulkan spec, it is explicitly handled
+// in this tutorial.
 vk::Queue                                       g_vk_graphics_queue;
 vk::Queue                                       g_vk_present_queue;
 // Vulkan device
+// This is the abstract device concept of graphics hardware. It is responsible for creating varies kinds of resources. Note, a vulkan
+// device is neither for issuing draw calls, nor for submitting command buffers.
 vk::Device                                      g_vk_device;
 // Vulkan fences
+// Fence objects are for CPU to wait for certain operations on GPU to be done. We can write a fence on command buffer to indicate the
+// previous operations are all done. CPU can choose to wait for fence to make sure the commands of its interest are already executed on
+// GPU. This is a useful data structure to make sure CPU is not too fast than GPU, in this tutorial, too fast means 3 frames faster than
+// GPU execution.
 vk::Fence                                       g_vk_fence[FRAME_LAG];
 // Vulkan semaphores
+// Different from fence, semaphores are used to explicitly sychronize between different command buffers in gpu command queues.
+// One typical usage of this semaphore concepts is we need to acquire the next avaiable image in swapchain and the command buffer should 
+// not start executing on command queue before it acquires the image successfully.
 vk::Semaphore                                   g_vk_image_acquired_semaphores[FRAME_LAG];
 vk::Semaphore                                   g_vk_draw_complete_semaphores[FRAME_LAG];
 vk::Semaphore                                   g_vk_image_ownership_semaphores[FRAME_LAG];
-// vulkan image in swap chain
+// Vulkan image in swapchain
+// Upon creation of vulkan swapchain, there are already a few images inside. This is just to explictly keep track of them.
 std::vector<vk::Image>                          g_vk_images;
+// Vulkan command pool
+// Command pool keeps track of all memory for command buffers.
+vk::CommandPool                                 g_vk_graphics_cmd_pool;
+vk::CommandPool                                 g_vk_present_cmd_pool;
 // Vulkan graphics command list
+// In this tutorial, nothing, but clearing the backbuffer is done in this command list.
 std::vector<vk::CommandBuffer>                  g_vk_graphics_cmd;
 // Vulkan present command list
+// In the case of separate present queue, this command list will do proper resource transition.
 std::vector<vk::CommandBuffer>                  g_vk_present_cmd;
 // Vulkan swap chain
 vk::SwapchainKHR                                g_vk_swapchain;
-// Vulkan command pool
-vk::CommandPool                                 g_vk_graphics_cmd_pool;
-vk::CommandPool                                 g_vk_present_cmd_pool;
+
 
 // Vulkan extensions
 std::vector<const char*>                        g_device_exts;
 // Vulkan instance layer
 std::vector<const char*>                        g_instance_layers;
-
 // Whether there are separate graphics and present queue
 bool                                            g_use_separate_queue;
 // Current frame index
 unsigned int                                    g_frame_index;
-
 // Vulkan queue index
 unsigned int                                    g_graphics_queue_family_index = UINT32_MAX;
 unsigned int                                    g_present_queue_family_index = UINT32_MAX;
-
 // final swap chain image count
 uint32_t                                        g_swapchain_image_cnt = 0;
+
 
 /*
  * Enable gpu validation.
@@ -98,6 +139,10 @@ bool enable_gpu_validation() {
     return false;
 }
 
+
+/*
+ * Create vulkan instance.
+ */
 static bool create_vk_instance() {
     // Vulkan instance extensions
     std::vector<const char*> instance_exts;
@@ -155,6 +200,10 @@ static bool create_vk_instance() {
     return true;
 }
 
+
+/*
+ * Create vulkan physical device.
+ */
 static bool create_vk_physical_device() {
     // initialize physical device
     {
@@ -201,6 +250,11 @@ static bool create_vk_physical_device() {
     return true;
 }
 
+
+/*
+ * Create the vulkan swapchain.
+ * This function also creates a few sychronization objects too.
+ */
 static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     // Create vulkan surface
     auto const createInfo = vk::Win32SurfaceCreateInfoKHR().setHinstance(hInstnace).setHwnd(hwnd);
@@ -227,10 +281,9 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
                 g_graphics_queue_family_index = i;
             }
 
-            if (supportsPresent[i] == VK_TRUE) {
+            if (supportsPresent[i] == VK_TRUE)
                 g_present_queue_family_index = i;
-                break;
-            }
+            break;
         }
     }
 
@@ -300,29 +353,6 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     else
         vk_surface_format = surface_format[0].format;
     auto vk_color_space = surface_format[0].colorSpace;
-
-    // Create semaphores to synchronize acquiring presentable buffers before
-    // rendering and waiting for drawing to be complete before presenting
-    auto const semaphoreCreateInfo = vk::SemaphoreCreateInfo();
-
-    // Create fences that we can use to throttle if we get too far ahead of the image presents
-    auto const fence_ci = vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled);
-    for (uint32_t i = 0; i < FRAME_LAG; i++) {
-        result = g_vk_device.createFence(&fence_ci, nullptr, &g_vk_fence[i]);
-        VERIFY(result);
-
-        result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_acquired_semaphores[i]);
-        VERIFY(result);
-
-        result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_draw_complete_semaphores[i]);
-        VERIFY(result);
-
-        if (g_use_separate_queue) {
-            result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_ownership_semaphores[i]);
-            VERIFY(result);
-        }
-    }
-    g_frame_index = 0;
 
     // Check the surface capabilities and formats
     vk::SurfaceCapabilitiesKHR surf_caps;
@@ -394,9 +424,36 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, g_vk_images.data());
     VERIFY(result);
 
+    // Create semaphores to synchronize acquiring presentable buffers before
+    // rendering and waiting for drawing to be complete before presenting
+    auto const semaphoreCreateInfo = vk::SemaphoreCreateInfo();
+
+    // Create fences that we can use to throttle if we get too far ahead of the image presents
+    auto const fence_ci = vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled);
+    for (uint32_t i = 0; i < FRAME_LAG; i++) {
+        result = g_vk_device.createFence(&fence_ci, nullptr, &g_vk_fence[i]);
+        VERIFY(result);
+
+        result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_acquired_semaphores[i]);
+        VERIFY(result);
+
+        result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_draw_complete_semaphores[i]);
+        VERIFY(result);
+
+        if (g_use_separate_queue) {
+            result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_ownership_semaphores[i]);
+            VERIFY(result);
+        }
+    }
+    g_frame_index = 0;
+
     return true;
 }
 
+
+/*
+ * Create command pool and command buffers
+ */
 static bool create_command() {
     auto const cmd_pool_info = vk::CommandPoolCreateInfo()
         .setQueueFamilyIndex(g_graphics_queue_family_index)
@@ -442,6 +499,10 @@ static bool create_command() {
     return true;
 }
 
+
+/*
+ * Resource transition.
+ */
 template<vk::ImageLayout old_layout, vk::ImageLayout new_layout>
 void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, const uint32_t src_queue_index, const uint32_t dst_queue_index) {
     auto const barrier =
@@ -459,6 +520,10 @@ void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, 
                         vk::DependencyFlagBits(), 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
+
+/*
+ * Initialize the vulkan sample.
+ */
 bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     // enable gpu validation if needed
     enable_gpu_validation();
@@ -482,6 +547,10 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     return true;
 }
 
+
+/*
+ * Renders a frame.
+ */
 void VulkanGraphicsSample::render_frame() {
     static std::vector<bool> first_time_transit(g_swapchain_image_cnt, true);
 
@@ -578,10 +647,11 @@ void VulkanGraphicsSample::render_frame() {
     g_frame_index %= FRAME_LAG;
 }
 
-void VulkanGraphicsSample::shutdown() {
-    // wait for vulkan device to be idle
-    g_vk_device.waitIdle();
 
+/*
+ * Teardown vulkan related stuff.
+ */
+void VulkanGraphicsSample::shutdown() {
     // Wait for fences from present operations
     for (uint32_t i = 0; i < FRAME_LAG; i++) {
         g_vk_device.waitForFences(1, &g_vk_fence[i], VK_TRUE, UINT64_MAX);
