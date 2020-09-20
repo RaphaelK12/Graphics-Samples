@@ -26,8 +26,8 @@
        - Proper transition of an image.
 */
 
-// Allow a maximum of two outstanding presentation operations.
-#define FRAME_LAG 2
+// Allow a maximum of three outstanding presentation operations.
+#define NUM_FRAMES 3
 
 #define VERIFY(ret)         if(ret != vk::Result::eSuccess) return false;
 
@@ -56,7 +56,7 @@ vk::SurfaceKHR                                  g_vk_surface;
 vk::SwapchainKHR                                g_vk_swapchain;
 // Vulkan image in swapchain
 // Upon creation of vulkan swapchain, there are already a few images inside. This is just to explictly keep track of them.
-std::vector<vk::Image>                          g_vk_images;
+vk::Image                                       g_vk_images[NUM_FRAMES];
 // Vulkan command pool
 // Command pool keeps track of all memory for command buffers.
 vk::CommandPool                                 g_vk_graphics_cmd_pool;
@@ -64,21 +64,21 @@ vk::CommandPool                                 g_vk_present_cmd_pool;
 // Vulkan command list
 // In this tutorial, nothing, but clearing the backbuffer is done in this command list.
 // In the case of separate present queue, the present command list will do proper resource transition.
-std::vector<vk::CommandBuffer>                  g_vk_graphics_cmd;
-std::vector<vk::CommandBuffer>                  g_vk_present_cmd;
+vk::CommandBuffer                               g_vk_graphics_cmd[NUM_FRAMES];
+vk::CommandBuffer                               g_vk_present_cmd[NUM_FRAMES];
 // Vulkan fences
 // Fence objects are for CPU to wait for certain operations on GPU to be done. We can write a fence on command buffer to indicate the
 // previous operations are all done. CPU can choose to wait for fence to make sure the commands of its interest are already executed on
 // GPU. This is a useful data structure to make sure CPU is not too fast than GPU, in this tutorial, too fast means 3 frames faster than
 // GPU execution.
-vk::Fence                                       g_vk_fence[FRAME_LAG];
+vk::Fence                                       g_vk_fence[NUM_FRAMES];
 // Vulkan semaphores
 // Different from fence, semaphores are used to explicitly sychronize between different command buffers in gpu command queues.
 // One typical usage of this semaphore concepts is we need to acquire the next avaiable image in swapchain and the command buffer should 
 // not start executing on command queue before it acquires the image successfully.
-vk::Semaphore                                   g_vk_image_acquired_semaphores[FRAME_LAG];
-vk::Semaphore                                   g_vk_draw_complete_semaphores[FRAME_LAG];
-vk::Semaphore                                   g_vk_image_ownership_semaphores[FRAME_LAG];
+vk::Semaphore                                   g_vk_image_acquired_semaphores[NUM_FRAMES];
+vk::Semaphore                                   g_vk_draw_complete_semaphores[NUM_FRAMES];
+vk::Semaphore                                   g_vk_image_ownership_semaphores[NUM_FRAMES];
 
 // Vulkan extensions
 std::vector<const char*>                        g_device_exts;
@@ -86,14 +86,11 @@ std::vector<const char*>                        g_device_exts;
 std::vector<const char*>                        g_instance_layers;
 // Whether there are separate graphics and present queue
 bool                                            g_use_separate_queue;
-// Current frame index
-unsigned int                                    g_frame_index;
 // Vulkan queue index
 unsigned int                                    g_graphics_queue_family_index = UINT32_MAX;
 unsigned int                                    g_present_queue_family_index = UINT32_MAX;
-// final swap chain image count
-uint32_t                                        g_swapchain_image_cnt = 0;
-
+// Current frame index
+unsigned int                                    g_frame_index = 0;
 
 /*
  * Enable gpu validation.
@@ -377,9 +374,7 @@ static bool create_vk_swapchain() {
 
     vk::PresentModeKHR present_mode = vk::PresentModeKHR::eFifo;
 
-    uint32_t swapchain_image_cnt = 3;
-    if (surf_caps.maxImageCount > 0 && swapchain_image_cnt > surf_caps.maxImageCount)
-        swapchain_image_cnt = surf_caps.maxImageCount;
+    assert(NUM_FRAMES <= surf_caps.maxImageCount);
 
     vk::SurfaceTransformFlagBitsKHR pre_transform;
     if (surf_caps.supportedTransforms & vk::SurfaceTransformFlagBitsKHR::eIdentity)
@@ -404,7 +399,7 @@ static bool create_vk_swapchain() {
 
     auto const swapchain_ci = vk::SwapchainCreateInfoKHR()
         .setSurface(g_vk_surface)
-        .setMinImageCount(swapchain_image_cnt)
+        .setMinImageCount(NUM_FRAMES)
         .setImageFormat(vk_surface_format)
         .setImageColorSpace(vk_color_space)
         .setImageExtent({ swapchainExtent.width, swapchainExtent.height })
@@ -421,10 +416,6 @@ static bool create_vk_swapchain() {
     result = g_vk_device.createSwapchainKHR(&swapchain_ci, nullptr, &g_vk_swapchain);
     VERIFY(result);
 
-    
-
-    g_frame_index = 0;
-
     return true;
 }
 
@@ -434,12 +425,13 @@ static bool create_vk_swapchain() {
  */
 static bool acquire_vk_images() {
     // check how many images there are in the swapchain
-    auto result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, static_cast<vk::Image*>(nullptr));
+    uint32_t swapchain_image_cnt = 0;
+    auto result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &swapchain_image_cnt, static_cast<vk::Image*>(nullptr));
     VERIFY(result);
+    assert(swapchain_image_cnt == NUM_FRAMES);
 
     // get vulkan images in the swapchain
-    g_vk_images.resize(g_swapchain_image_cnt);
-    result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, g_vk_images.data());
+    result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &swapchain_image_cnt, g_vk_images);
     VERIFY(result);
 
     return true;
@@ -457,7 +449,7 @@ static bool create_vk_sychronization_objs() {
 
     // Create fences that we can use to throttle if we get too far ahead of the image presents
     auto const fence_ci = vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled);
-    for (uint32_t i = 0; i < FRAME_LAG; i++) {
+    for (uint32_t i = 0; i < NUM_FRAMES; i++) {
         result = g_vk_device.createFence(&fence_ci, nullptr, &g_vk_fence[i]);
         VERIFY(result);
 
@@ -496,8 +488,7 @@ static bool create_vk_command() {
         .setCommandBufferCount(1);
 
     // create the command buffer
-    g_vk_graphics_cmd.resize(g_swapchain_image_cnt);
-    for (uint32_t i = 0; i < g_swapchain_image_cnt; ++i) {
+    for (uint32_t i = 0; i < NUM_FRAMES; ++i) {
         result = g_vk_device.allocateCommandBuffers(&cmd, &g_vk_graphics_cmd[i]);
         VERIFY(result);
     }
@@ -515,8 +506,7 @@ static bool create_vk_command() {
             .setLevel(vk::CommandBufferLevel::ePrimary)
             .setCommandBufferCount(1);
 
-        g_vk_present_cmd.resize(g_swapchain_image_cnt);
-        for (uint32_t i = 0; i < g_swapchain_image_cnt; i++) {
+        for (uint32_t i = 0; i < NUM_FRAMES; i++) {
             result = g_vk_device.allocateCommandBuffers(&present_cmd, &g_vk_present_cmd[i]);
             VERIFY(result);
         }
@@ -605,12 +595,14 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
  * Renders a frame.
  */
 void VulkanGraphicsSample::render_frame() {
-    static std::vector<bool> first_time_transit(g_swapchain_image_cnt, true);
+    static std::vector<bool> first_time(NUM_FRAMES, true);
 
-    uint32_t current_buffer = 0;
-
+    // making sure the frame to be written is not pending on execution
     g_vk_device.waitForFences(1, &g_vk_fence[g_frame_index], VK_TRUE, UINT64_MAX);
     g_vk_device.resetFences({ g_vk_fence[g_frame_index] });
+
+    // Different from the frame index, which is modulated by NUM_FRAMES, this index is indicating the frame buffer index to render on.
+    uint32_t current_buffer = 0;
 
     vk::Result result;
     result = g_vk_device.acquireNextImageKHR(g_vk_swapchain, UINT64_MAX, g_vk_image_acquired_semaphores[g_frame_index], vk::Fence(), &current_buffer);
@@ -623,27 +615,26 @@ void VulkanGraphicsSample::render_frame() {
         static float g = 0.0f;
         g += 0.05f;
 
-        g_vk_graphics_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0);
+        g_vk_graphics_cmd[g_frame_index].reset((vk::CommandBufferResetFlags)0);
 
-        auto result = g_vk_graphics_cmd[current_buffer].begin(&commandInfo);
+        auto result = g_vk_graphics_cmd[g_frame_index].begin(&commandInfo);
 
-        if (first_time_transit[current_buffer]) {
-            image_transition<vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
-            first_time_transit[current_buffer] = false;
-        }
-        else {
-            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
+        if (first_time[current_buffer]) {
+            image_transition<vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
+            first_time[current_buffer] = false;
+        } else {
+            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
         }
 
         // clear the back buffer
-        g_vk_graphics_cmd[current_buffer].clearColorImage( g_vk_images[current_buffer], vk::ImageLayout::eTransferDstOptimal,
+        g_vk_graphics_cmd[g_frame_index].clearColorImage( g_vk_images[g_frame_index], vk::ImageLayout::eTransferDstOptimal,
                                                         vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, sinf(g), 1.0f} })),
                                                         vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
-        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
+        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
+        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
 
-        g_vk_graphics_cmd[current_buffer].end();
+        g_vk_graphics_cmd[g_frame_index].end();
     }
 
     vk::PipelineStageFlags const pipe_stage_flags = vk::PipelineStageFlagBits::eColorAttachmentOutput;
@@ -652,7 +643,7 @@ void VulkanGraphicsSample::render_frame() {
         .setWaitSemaphoreCount(1)
         .setPWaitSemaphores(&g_vk_image_acquired_semaphores[g_frame_index])
         .setCommandBufferCount(1)
-        .setPCommandBuffers(&g_vk_graphics_cmd[current_buffer])
+        .setPCommandBuffers(&g_vk_graphics_cmd[g_frame_index])
         .setSignalSemaphoreCount(1)
         .setPSignalSemaphores(&g_vk_draw_complete_semaphores[g_frame_index]);
 
@@ -660,14 +651,14 @@ void VulkanGraphicsSample::render_frame() {
     assert(result == vk::Result::eSuccess);
 
     if (g_use_separate_queue) {
-        g_vk_present_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0);
+        g_vk_present_cmd[g_frame_index].reset((vk::CommandBufferResetFlags)0);
 
         auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
-        auto result = g_vk_present_cmd[current_buffer].begin(&commandInfo);
+        auto result = g_vk_present_cmd[g_frame_index].begin(&commandInfo);
 
-        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_present_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
+        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_present_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
 
-        g_vk_present_cmd[current_buffer].end();
+        g_vk_present_cmd[g_frame_index].end();
 
         // If we are using separate queues, change image ownership to the
         // present queue before presenting, waiting for the draw complete
@@ -678,7 +669,7 @@ void VulkanGraphicsSample::render_frame() {
             .setWaitSemaphoreCount(1)
             .setPWaitSemaphores(&g_vk_draw_complete_semaphores[g_frame_index])
             .setCommandBufferCount(1)
-            .setPCommandBuffers(&g_vk_present_cmd[current_buffer])
+            .setPCommandBuffers(&g_vk_present_cmd[g_frame_index])
             .setSignalSemaphoreCount(1)
             .setPSignalSemaphores(&g_vk_image_ownership_semaphores[g_frame_index]);
 
@@ -697,7 +688,7 @@ void VulkanGraphicsSample::render_frame() {
     assert(result == vk::Result::eSuccess);
 
     g_frame_index += 1;
-    g_frame_index %= FRAME_LAG;
+    g_frame_index %= NUM_FRAMES;
 }
 
 
@@ -706,7 +697,7 @@ void VulkanGraphicsSample::render_frame() {
  */
 void VulkanGraphicsSample::shutdown() {
     // Wait for fences from present operations
-    for (uint32_t i = 0; i < FRAME_LAG; i++) {
+    for (uint32_t i = 0; i < NUM_FRAMES; i++) {
         g_vk_device.waitForFences(1, &g_vk_fence[i], VK_TRUE, UINT64_MAX);
         g_vk_device.destroyFence(g_vk_fence[i], nullptr);
         g_vk_device.destroySemaphore(g_vk_image_acquired_semaphores[i], nullptr);
