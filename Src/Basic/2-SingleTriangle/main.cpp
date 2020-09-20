@@ -12,7 +12,6 @@
 
 // class name and window title
 static constexpr wchar_t  CLASS_NAME[] = L"Jiayin's Graphics Samples";
-static constexpr wchar_t  WINDOW_TITLE[] = L"2 - SingleTriangle";
 
 // Whether the program is quitting
 static bool g_quiting = false;
@@ -38,6 +37,16 @@ static inline LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, L
 
 // Entry point of the application
 int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLine, int nShowCmd) {
+    const wchar_t* window_title = L"";
+    if (strcmp(lpCmdLine, "-vulkan") == 0) {
+        g_graphics_sample = std::make_unique<VulkanGraphicsSample>();
+        window_title = L"2 - SingleTriangle (Vulkan)";
+    }
+    else {
+        g_graphics_sample = std::make_unique<D3D12GraphicsSample>();
+        window_title = L"2 - SingleTriangle (D3D12)";
+    }
+
     // Register the window class.
     WNDCLASSEXW wcex;
     memset(&wcex, 0, sizeof(wcex));
@@ -55,15 +64,10 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
     RegisterClassExW(&wcex);
 
     // Create the window.
-    HWND hwnd = CreateWindowW(CLASS_NAME, WINDOW_TITLE, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+    HWND hwnd = CreateWindowW(CLASS_NAME, window_title, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, 0, g_window_width, g_window_height, nullptr, nullptr, hInInstance, nullptr);
     if (hwnd == NULL)
         return 0;
-
-    if (strcmp(lpCmdLine, "-vulkan") == 0)
-        g_graphics_sample = std::make_unique<VulkanGraphicsSample>();
-    else
-        g_graphics_sample = std::make_unique<D3D12GraphicsSample>();
 
     // Initialize d3d12
     const auto d3d12_initialized = g_graphics_sample->initialize(hwnd);
