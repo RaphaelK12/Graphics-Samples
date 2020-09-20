@@ -37,22 +37,21 @@ static ComPtr<ID3D12CommandQueue>           g_command_queue = nullptr;
 static ComPtr<IDXGISwapChain4>              g_swap_chain = nullptr;
 // The three back buffers acquired from the swap chain.
 static ComPtr<ID3D12Resource>               g_back_buffers[NUM_FRAMES] = { nullptr, nullptr, nullptr };
-// Descriptor is a new concept in d3d12, descriptor is what we use to describe a resource and have them linked to graphics
-// pipeline. Unlike d3d11, the memory management is explicitly, no memory allocation under the hood of API. In order to
-// allocate a descriptor, we need a descriptor heap, which is responsible for keeping all descriptors memory alive.
-static ComPtr<ID3D12DescriptorHeap>         g_descriptor_heap = nullptr;
+// A command list only translate the GPU command into commands of correct format. It doesn't keep the command buffer memory, 
+// the command allocator does.
+static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES] = { nullptr, nullptr, nullptr };
 // Different from d3d11, command list is an exposed data structure and it is responsible for pushing GPU commands in a 
 // command buffer. A program can have multiple of command lists and have different thread pushing GPU commands to different 
 // command list, this is how d3d12 greatly reduce the CPU overhead of API calls. Though, it is not demonstrated in this 
 // tutorial.
 static ComPtr<ID3D12GraphicsCommandList>    g_command_list = nullptr;
-// A command list only translate the GPU command into commands of correct format. It doesn't keep the command buffer memory, 
-// the command allocator does.
-static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES] = { nullptr, nullptr, nullptr };
 // Fence object is used to make sure CPU is never too fast. In this tutorial, if it is 3 frames ahead of GPU, it will be 
 // stalled.
 static ComPtr<ID3D12Fence>                  g_fence = nullptr;
-
+// Descriptor is a new concept in d3d12, descriptor is what we use to describe a resource and have them linked to graphics
+// pipeline. Unlike d3d11, the memory management is explicitly, no memory allocation under the hood of API. In order to
+// allocate a descriptor, we need a descriptor heap, which is responsible for keeping all descriptors memory alive.
+static ComPtr<ID3D12DescriptorHeap>         g_descriptor_heap = nullptr;
 
 // Following are some generic data of this tutorial program.
 
@@ -72,7 +71,7 @@ static UINT64                               g_frame_fence_values[NUM_FRAMES];
 /*
  * This function helps locate the adapter with the largest dram.
  */
-bool enum_adapter() {
+bool enum_d3d12_adapter() {
     // Find a proper adapter
     Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
     const auto hRet = CreateDXGIFactory1(IID_PPV_ARGS(&factory));
@@ -187,7 +186,7 @@ bool create_d3d12_device() {
 /*
  * Create a graphics command queue.
  */
-bool create_command_queue() {
+bool create_d3d12_command_queue() {
     // create a graphcis command queue
     D3D12_COMMAND_QUEUE_DESC desc = {};
     desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -207,7 +206,7 @@ bool create_command_queue() {
 /*
  * Create a swap chain.
  */
-bool create_swap_chain(HWND hwnd) {
+bool create_d3d12_swap_chain(HWND hwnd) {
     // create the swap chain
     ComPtr<IDXGISwapChain4> dxgiSwapChain4;
     ComPtr<IDXGIFactory4> dxgiFactory4;
@@ -259,7 +258,7 @@ bool create_swap_chain(HWND hwnd) {
 /*
  * Create a command list and three command list allocators.
  */
-bool create_commands() {
+bool create_d3d12_commands() {
     for (auto i = 0; i < NUM_FRAMES; ++i) {
         // create command list allocator
         const auto ret = g_d3d12_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_command_list_allocators[i]));
@@ -280,7 +279,7 @@ bool create_commands() {
 /*
  * Create render target views.
  */
-bool create_rtvs() {
+bool create_d3d12_rtvs() {
     // create descriptor heap
     D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
     heap_desc.NumDescriptors = NUM_FRAMES;
@@ -313,7 +312,7 @@ bool create_rtvs() {
 /*
  * Create a fence for synchronization.
  */
-bool create_fence() {
+bool create_d3d12_fence() {
     // create a fence, this is for synchronization between cpu and gpu
     const auto ret = g_d3d12_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
     if (FAILED(ret))
@@ -338,33 +337,41 @@ bool create_fence() {
  *   - create a fence object for CPU and GPU synchronization
  */
 bool D3D12GraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
-    auto ret = enum_adapter();
+    // enable gpu validation if needed
+    enable_gpu_validation();
+
+    // enumerate all d3d12 compatible graphis hardware on this machine.
+    auto ret = enum_d3d12_adapter();
     if (!ret)
         return false;
 
-    enable_gpu_validation();
-
+    // create d3d12 device
     ret = create_d3d12_device();
     if (!ret)
         return false;
 
-    ret = create_command_queue();
+    // create d3d12 command queues
+    ret = create_d3d12_command_queue();
     if (!ret)
         return false;
 
-    ret = create_swap_chain(hwnd);
+    // create swapchain
+    ret = create_d3d12_swap_chain(hwnd);
     if (!ret)
         return false;
 
-    ret = create_commands();
+    // create the render target views
+    ret = create_d3d12_rtvs();
     if (!ret)
         return false;
 
-    ret = create_rtvs();
+    // create command allocators and command lists
+    ret = create_d3d12_commands();
     if (!ret)
         return false;
 
-    ret = create_fence();
+    // create fence objects for sychronization
+    ret = create_d3d12_fence();
     if (!ret)
         return false;
 

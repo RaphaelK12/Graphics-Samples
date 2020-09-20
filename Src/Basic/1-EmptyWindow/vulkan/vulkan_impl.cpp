@@ -15,19 +15,8 @@
 
 /*
     This tutorial demonstrates how to initialize Vulkan and clear the back buffer every frame.
-    
-    Followings are the basic steps to initialize a Vulkan application.
-       - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
-       - Create Vulkan instance
-       - Enumerate vulkan physical devices and use the first one
-       - Create Vulkan surface
-       - Enumerate all available queues and pick a graphics queue and present queue
-         - Graphics queue can be different with present queue in this demo
-       - Create Vulkan swapchain
-         - Get all vulkan images in the swapchain
-       - Create command pool and command buffers
-         - May need separate command pool and buffers for present operations if a separate present queue is used.
-    
+    It is mainly for demonstrating how to properly initialize vulkan and have it render frames properly.
+
     Apart from its initialization, this tutorial also demonstrate the following things
        - How to properly sycnronize cpu and gpu with vulkan fences.
        - Acquiring image from swapchain.
@@ -49,8 +38,10 @@ vk::Instance                                    g_vk_instance;
 // This will be implicitly destroyed after VkInstance is destroyed, so there is no need to explicitly destroy this variable.
 // https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Physical_devices_and_queue_families
 vk::PhysicalDevice                              g_vk_physical_device;
-// Vulkan swapchain surface
-vk::SurfaceKHR                                  g_vk_surface;
+// Vulkan device
+// This is the abstract device concept of graphics hardware. It is responsible for creating varies kinds of resources. Note, a vulkan
+// device is neither for issuing draw calls, nor for submitting command buffers.
+vk::Device                                      g_vk_device;
 // Vulkan graphics queue and present queue
 // Most of the time graphics queue will have present feature, meaning it is almost true all the time this tutorial won't use separate
 // queues for graphics and presenting. As a matter of fact, on GCN hardware, there is no dedicated present queue hardware unit at all.
@@ -59,10 +50,22 @@ vk::SurfaceKHR                                  g_vk_surface;
 // in this tutorial.
 vk::Queue                                       g_vk_graphics_queue;
 vk::Queue                                       g_vk_present_queue;
-// Vulkan device
-// This is the abstract device concept of graphics hardware. It is responsible for creating varies kinds of resources. Note, a vulkan
-// device is neither for issuing draw calls, nor for submitting command buffers.
-vk::Device                                      g_vk_device;
+// Vulkan swapchain surface
+vk::SurfaceKHR                                  g_vk_surface;
+// Vulkan swap chain
+vk::SwapchainKHR                                g_vk_swapchain;
+// Vulkan image in swapchain
+// Upon creation of vulkan swapchain, there are already a few images inside. This is just to explictly keep track of them.
+std::vector<vk::Image>                          g_vk_images;
+// Vulkan command pool
+// Command pool keeps track of all memory for command buffers.
+vk::CommandPool                                 g_vk_graphics_cmd_pool;
+vk::CommandPool                                 g_vk_present_cmd_pool;
+// Vulkan command list
+// In this tutorial, nothing, but clearing the backbuffer is done in this command list.
+// In the case of separate present queue, the present command list will do proper resource transition.
+std::vector<vk::CommandBuffer>                  g_vk_graphics_cmd;
+std::vector<vk::CommandBuffer>                  g_vk_present_cmd;
 // Vulkan fences
 // Fence objects are for CPU to wait for certain operations on GPU to be done. We can write a fence on command buffer to indicate the
 // previous operations are all done. CPU can choose to wait for fence to make sure the commands of its interest are already executed on
@@ -76,22 +79,6 @@ vk::Fence                                       g_vk_fence[FRAME_LAG];
 vk::Semaphore                                   g_vk_image_acquired_semaphores[FRAME_LAG];
 vk::Semaphore                                   g_vk_draw_complete_semaphores[FRAME_LAG];
 vk::Semaphore                                   g_vk_image_ownership_semaphores[FRAME_LAG];
-// Vulkan image in swapchain
-// Upon creation of vulkan swapchain, there are already a few images inside. This is just to explictly keep track of them.
-std::vector<vk::Image>                          g_vk_images;
-// Vulkan command pool
-// Command pool keeps track of all memory for command buffers.
-vk::CommandPool                                 g_vk_graphics_cmd_pool;
-vk::CommandPool                                 g_vk_present_cmd_pool;
-// Vulkan graphics command list
-// In this tutorial, nothing, but clearing the backbuffer is done in this command list.
-std::vector<vk::CommandBuffer>                  g_vk_graphics_cmd;
-// Vulkan present command list
-// In the case of separate present queue, this command list will do proper resource transition.
-std::vector<vk::CommandBuffer>                  g_vk_present_cmd;
-// Vulkan swap chain
-vk::SwapchainKHR                                g_vk_swapchain;
-
 
 // Vulkan extensions
 std::vector<const char*>                        g_device_exts;
@@ -181,6 +168,9 @@ static bool create_vk_instance() {
 
     // create the vulkan instance
     {
+        // The app information is mostly like to be ignored by the driver.
+        // But in some cases, vendor specific driver may have some optimizations for certain apps, 
+        // this is a great place for them to indicate the driver this is the specific app to be optimized.
         auto const app = vk::ApplicationInfo()
             .setPApplicationName("1 - EmptyWindow")
             .setApplicationVersion(0)
@@ -253,10 +243,9 @@ static bool create_vk_physical_device() {
 
 
 /*
- * Create the vulkan swapchain.
- * This function also creates a few sychronization objects too.
+ * Create vulkan device.
  */
-static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
+static bool create_vk_device(const HINSTANCE hInstnace, const HWND hwnd) {
     // Create vulkan surface
     auto const createInfo = vk::Win32SurfaceCreateInfoKHR().setHinstance(hInstnace).setHwnd(hwnd);
     auto result = g_vk_instance.createWin32SurfaceKHR(&createInfo, nullptr, &g_vk_surface);
@@ -334,12 +323,27 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
         VERIFY(result);
     }
 
+    return true;
+}
+
+
+/*
+ * Acquire the vulkan command queues
+ */
+static bool acquire_vk_command_queue() {
     g_vk_device.getQueue(g_graphics_queue_family_index, 0, &g_vk_graphics_queue);
     g_vk_device.getQueue(g_present_queue_family_index, 0, &g_vk_present_queue);
+    return true;
+}
 
+/*
+ * Create the vulkan swapchain.
+ * This function also creates a few sychronization objects too.
+ */
+static bool create_vk_swapchain() {
     // Get the list of VkFormat's that are supported:
     uint32_t format_count;
-    result = g_vk_physical_device.getSurfaceFormatsKHR(g_vk_surface, &format_count, static_cast<vk::SurfaceFormatKHR*>(nullptr));
+    auto result = g_vk_physical_device.getSurfaceFormatsKHR(g_vk_surface, &format_count, static_cast<vk::SurfaceFormatKHR*>(nullptr));
     VERIFY(result);
 
     auto surface_format = std::make_unique<vk::SurfaceFormatKHR[]>(format_count);
@@ -417,7 +421,20 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     result = g_vk_device.createSwapchainKHR(&swapchain_ci, nullptr, &g_vk_swapchain);
     VERIFY(result);
 
-    result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, static_cast<vk::Image*>(nullptr));
+    
+
+    g_frame_index = 0;
+
+    return true;
+}
+
+
+/*
+ * Acquire the images in the swapchain.
+ */
+static bool acquire_vk_images() {
+    // check how many images there are in the swapchain
+    auto result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, static_cast<vk::Image*>(nullptr));
     VERIFY(result);
 
     // get vulkan images in the swapchain
@@ -425,9 +442,18 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, g_vk_images.data());
     VERIFY(result);
 
+    return true;
+}
+
+/*
+ * Create sychronization objects.
+ */
+static bool create_vk_sychronization_objs() {
     // Create semaphores to synchronize acquiring presentable buffers before
     // rendering and waiting for drawing to be complete before presenting
     auto const semaphoreCreateInfo = vk::SemaphoreCreateInfo();
+
+    auto result = vk::Result::eSuccess;
 
     // Create fences that we can use to throttle if we get too far ahead of the image presents
     auto const fence_ci = vk::FenceCreateInfo().setFlags(vk::FenceCreateFlagBits::eSignaled);
@@ -446,7 +472,6 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
             VERIFY(result);
         }
     }
-    g_frame_index = 0;
 
     return true;
 }
@@ -455,7 +480,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
 /*
  * Create command pool and command buffers
  */
-static bool create_command() {
+static bool create_vk_command() {
     auto const cmd_pool_info = vk::CommandPoolCreateInfo()
         .setQueueFamilyIndex(g_graphics_queue_family_index)
         .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
@@ -524,6 +549,17 @@ void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, 
 
 /*
  * Initialize the vulkan sample.
+ * Followings are the basic steps to initialize a Vulkan application.
+ *   - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
+ *   - Create Vulkan instance
+ *   - Enumerate vulkan physical devices and use the first one
+ *   - Create Vulkan surface
+ *   - Enumerate all available queues and pick a graphics queue and present queue
+ *     - Graphics queue can be different with present queue in this demo
+ *   - Create Vulkan swapchain
+ *     - Get all vulkan images in the swapchain
+ *   - Create command pool and command buffers
+ *     - May need separate command pool and buffers for present operations if a separate present queue is used.
  */
 bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     // enable gpu validation if needed
@@ -533,16 +569,32 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     if (!create_vk_instance())
         return false;
 
-    // initialize vulkan device
+    // enumerate all d3d12 compatible graphis hardware on this machine.
     if (!create_vk_physical_device())
         return false;
     
+    // create vulkan device
+    if (!create_vk_device(hInstnace, hwnd))
+        return false;
+
+    // enumerate the vulkan command queues, this won't fail, but just to keep consistency, still checking.
+    if (!acquire_vk_command_queue())
+        return false;
+
     // create swap chain
-    if (!create_swapchain(hInstnace, hwnd))
+    if (!create_vk_swapchain())
+        return false;
+
+    // acquire the images in the swapchain
+    if (!acquire_vk_images())
         return false;
 
     // create command pool and commnad list
-    if (!create_command())
+    if (!create_vk_command())
+        return false;
+
+    // create fence and semaphores
+    if (!create_vk_sychronization_objs())
         return false;
 
     return true;
