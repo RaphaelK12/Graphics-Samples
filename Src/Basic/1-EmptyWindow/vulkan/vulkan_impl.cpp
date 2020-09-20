@@ -399,7 +399,7 @@ static bool create_buffers() {
         .setImageColorSpace(g_vk_color_space)
         .setImageExtent({ swapchainExtent.width, swapchainExtent.height })
         .setImageArrayLayers(1)
-        .setImageUsage(vk::ImageUsageFlagBits::eColorAttachment)
+        .setImageUsage(vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst)
         .setImageSharingMode(vk::SharingMode::eExclusive)
         .setQueueFamilyIndexCount(0)
         .setPQueueFamilyIndices(nullptr)
@@ -437,7 +437,9 @@ static bool create_buffers() {
 }
 
 static bool create_command() {
-    auto const cmd_pool_info = vk::CommandPoolCreateInfo().setQueueFamilyIndex(g_graphics_queue_family_index);
+    auto const cmd_pool_info = vk::CommandPoolCreateInfo()
+        .setQueueFamilyIndex(g_graphics_queue_family_index)
+        .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
 
     // create the graphics command pool
     auto result = g_vk_device.createCommandPool(&cmd_pool_info, nullptr, &g_vk_graphics_cmd_pool);
@@ -476,6 +478,23 @@ static bool create_command() {
     return true;
 }
 
+template<vk::ImageLayout old_layout, vk::ImageLayout new_layout>
+void image_transition(const unsigned int current_buffer) {
+    auto const barrier =
+        vk::ImageMemoryBarrier()
+        .setSrcAccessMask(vk::AccessFlags())
+        .setDstAccessMask(vk::AccessFlags())
+        .setOldLayout(old_layout)
+        .setNewLayout(new_layout)
+        .setSrcQueueFamilyIndex(g_graphics_queue_family_index)
+        .setDstQueueFamilyIndex(g_present_queue_family_index)
+        .setImage(g_vk_images[current_buffer])
+        .setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
+
+    g_vk_graphics_cmd[current_buffer].pipelineBarrier(vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eBottomOfPipe,
+                        vk::DependencyFlagBits(), 0, nullptr, 0, nullptr, 1, &barrier);
+}
+
 bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     // enable gpu validation if needed
     enable_gpu_validation();
@@ -504,6 +523,8 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
 }
 
 void VulkanGraphicsSample::render_frame() {
+    static std::vector<bool> first_time_transit(g_swapchain_image_cnt, true);
+
     uint32_t current_buffer = 0;
 
     g_vk_device.waitForFences(1, &g_vk_fence[g_frame_index], VK_TRUE, UINT64_MAX);
@@ -515,17 +536,31 @@ void VulkanGraphicsSample::render_frame() {
 
     // generate the command buffer
     {
+        vk::DispatchLoaderStatic d;
+
         auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
 
         static float g = 0.0f;
         g += 0.05f;
 
-        // clear the back buffer
-        vk::DispatchLoaderStatic d;
+        g_vk_graphics_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0, d);
+
         auto result = g_vk_graphics_cmd[current_buffer].begin(&commandInfo);
-        g_vk_graphics_cmd[current_buffer].clearColorImage( g_vk_images[current_buffer], vk::ImageLayout::eGeneral,
+
+        if (first_time_transit[current_buffer]) {
+            image_transition<vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal>(current_buffer);
+            first_time_transit[current_buffer] = false;
+        }
+        else {
+            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal>(current_buffer);
+        }
+
+        // clear the back buffer
+        g_vk_graphics_cmd[current_buffer].clearColorImage( g_vk_images[current_buffer], vk::ImageLayout::eTransferDstOptimal,
                                                         vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, sinf(g), 1.0f} })),
                                                         vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1), d);
+
+        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(current_buffer);
 
         g_vk_graphics_cmd[current_buffer].end();
     }
@@ -573,7 +608,6 @@ void VulkanGraphicsSample::render_frame() {
 
     g_frame_index += 1;
     g_frame_index %= FRAME_LAG;
-
 }
 
 void VulkanGraphicsSample::shutdown() {
