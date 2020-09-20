@@ -65,7 +65,7 @@ std::vector<const char*>                        g_instance_exts;
 std::vector<const char*>                        g_instance_layers;
 
 // Whether there are separate graphics and present queue
-bool                                            g_separate_queue;
+bool                                            g_use_separate_queue;
 // Current frame index
 unsigned int                                    g_frame_index;
 
@@ -260,7 +260,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
         return false;
 
     // Whether we are using separate command queues for graphics and presenting
-    g_separate_queue = g_graphics_queue_family_index != g_present_queue_family_index;
+    g_use_separate_queue = g_graphics_queue_family_index != g_present_queue_family_index;
 
     // Create vulkan device
     {
@@ -280,7 +280,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
             .setPpEnabledExtensionNames((const char* const*)g_device_exts.data())
             .setPEnabledFeatures(nullptr);
 
-        if (g_separate_queue) {
+        if (g_use_separate_queue) {
             queues[1].setQueueFamilyIndex(g_present_queue_family_index);
             queues[1].setQueueCount(1);
             queues[1].setPQueuePriorities(priorities);
@@ -327,7 +327,7 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
         result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_draw_complete_semaphores[i]);
         VERIFY(result);
 
-        if (g_separate_queue) {
+        if (g_use_separate_queue) {
             result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_ownership_semaphores[i]);
             VERIFY(result);
         }
@@ -452,8 +452,10 @@ static bool create_command() {
         VERIFY(result);
     }
 
-    if (g_separate_queue) {
-        auto const present_cmd_pool_info = vk::CommandPoolCreateInfo().setQueueFamilyIndex(g_present_queue_family_index);
+    if (g_use_separate_queue) {
+        auto const present_cmd_pool_info = vk::CommandPoolCreateInfo()
+                                            .setQueueFamilyIndex(g_present_queue_family_index)
+                                            .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
 
         result = g_vk_device.createCommandPool(&present_cmd_pool_info, nullptr, &g_vk_present_cmd_pool);
         VERIFY(result);
@@ -474,19 +476,19 @@ static bool create_command() {
 }
 
 template<vk::ImageLayout old_layout, vk::ImageLayout new_layout>
-void image_transition(const unsigned int current_buffer) {
+void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, const uint32_t src_queue_index, const uint32_t dst_queue_index) {
     auto const barrier =
         vk::ImageMemoryBarrier()
         .setSrcAccessMask(vk::AccessFlags())
         .setDstAccessMask(vk::AccessFlags())
         .setOldLayout(old_layout)
         .setNewLayout(new_layout)
-        .setSrcQueueFamilyIndex(g_graphics_queue_family_index)
-        .setDstQueueFamilyIndex(g_present_queue_family_index)
+        .setSrcQueueFamilyIndex(src_queue_index)
+        .setDstQueueFamilyIndex(dst_queue_index)
         .setImage(g_vk_images[current_buffer])
         .setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-    g_vk_graphics_cmd[current_buffer].pipelineBarrier(vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eBottomOfPipe,
+    cb.pipelineBarrier(vk::PipelineStageFlagBits::eBottomOfPipe, vk::PipelineStageFlagBits::eBottomOfPipe,
                         vk::DependencyFlagBits(), 0, nullptr, 0, nullptr, 1, &barrier);
 }
 
@@ -531,31 +533,30 @@ void VulkanGraphicsSample::render_frame() {
 
     // generate the command buffer
     {
-        vk::DispatchLoaderStatic d;
-
         auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
 
         static float g = 0.0f;
         g += 0.05f;
 
-        g_vk_graphics_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0, d);
+        g_vk_graphics_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0);
 
         auto result = g_vk_graphics_cmd[current_buffer].begin(&commandInfo);
 
         if (first_time_transit[current_buffer]) {
-            image_transition<vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal>(current_buffer);
+            image_transition<vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
             first_time_transit[current_buffer] = false;
         }
         else {
-            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal>(current_buffer);
+            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::eTransferDstOptimal>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
         }
 
         // clear the back buffer
         g_vk_graphics_cmd[current_buffer].clearColorImage( g_vk_images[current_buffer], vk::ImageLayout::eTransferDstOptimal,
                                                         vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, sinf(g), 1.0f} })),
-                                                        vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1), d);
+                                                        vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
-        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(current_buffer);
+        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
+        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
 
         g_vk_graphics_cmd[current_buffer].end();
     }
@@ -570,10 +571,19 @@ void VulkanGraphicsSample::render_frame() {
         .setSignalSemaphoreCount(1)
         .setPSignalSemaphores(&g_vk_draw_complete_semaphores[g_frame_index]);
 
-    result = g_vk_graphics_queue.submit(1, &submit_info, g_vk_fence[g_frame_index]);
+    result = g_vk_graphics_queue.submit(1, &submit_info, g_use_separate_queue ? vk::Fence() : g_vk_fence[g_frame_index]);
     assert(result == vk::Result::eSuccess);
 
-    if (g_separate_queue) {
+    if (g_use_separate_queue) {
+        g_vk_present_cmd[current_buffer].reset((vk::CommandBufferResetFlags)0);
+
+        auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
+        auto result = g_vk_present_cmd[current_buffer].begin(&commandInfo);
+
+        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_present_cmd[current_buffer], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
+
+        g_vk_present_cmd[current_buffer].end();
+
         // If we are using separate queues, change image ownership to the
         // present queue before presenting, waiting for the draw complete
         // semaphore and signalling the ownership released semaphore when
@@ -587,21 +597,19 @@ void VulkanGraphicsSample::render_frame() {
             .setSignalSemaphoreCount(1)
             .setPSignalSemaphores(&g_vk_image_ownership_semaphores[g_frame_index]);
 
-        result = g_vk_present_queue.submit(1, &present_submit_info, vk::Fence());
+        result = g_vk_present_queue.submit(1, &present_submit_info, g_vk_fence[g_frame_index]);
         assert(result == vk::Result::eSuccess);
     }
 
     auto const presentInfo = vk::PresentInfoKHR()
         .setWaitSemaphoreCount(1)
-        .setPWaitSemaphores(g_separate_queue ? &g_vk_image_ownership_semaphores[g_frame_index] : &g_vk_draw_complete_semaphores[g_frame_index])
+        .setPWaitSemaphores(g_use_separate_queue ? &g_vk_image_ownership_semaphores[g_frame_index] : &g_vk_draw_complete_semaphores[g_frame_index])
         .setSwapchainCount(1)
         .setPSwapchains(&g_vk_swapchain)
         .setPImageIndices(&current_buffer);
 
     result = g_vk_present_queue.presentKHR(&presentInfo);
     assert(result == vk::Result::eSuccess);
-
-    g_vk_device.waitForFences(1, &g_vk_fence[g_frame_index], VK_TRUE, UINT64_MAX);
 
     g_frame_index += 1;
     g_frame_index %= FRAME_LAG;
@@ -617,7 +625,7 @@ void VulkanGraphicsSample::shutdown() {
         g_vk_device.destroyFence(g_vk_fence[i], nullptr);
         g_vk_device.destroySemaphore(g_vk_image_acquired_semaphores[i], nullptr);
         g_vk_device.destroySemaphore(g_vk_draw_complete_semaphores[i], nullptr);
-        if (g_separate_queue)
+        if (g_use_separate_queue)
             g_vk_device.destroySemaphore(g_vk_image_ownership_semaphores[i], nullptr);
     }
 
@@ -630,7 +638,7 @@ void VulkanGraphicsSample::shutdown() {
 
     g_vk_device.destroyCommandPool(g_vk_graphics_cmd_pool, nullptr);
 
-    if (g_separate_queue) {
+    if (g_use_separate_queue) {
         g_vk_device.destroyCommandPool(g_vk_present_cmd_pool, nullptr);
     }
     g_vk_device.waitIdle();
