@@ -31,10 +31,6 @@ vk::Queue                                       g_vk_graphics_queue;
 vk::Queue                                       g_vk_present_queue;
 // Vulkan device
 vk::Device                                      g_vk_device;
-// Vulkan surface format
-vk::Format                                      g_vk_surface_format;
-// Vulkan color space
-vk::ColorSpaceKHR                               g_vk_color_space;
 // Vulkan fences
 vk::Fence                                       g_vk_fence[FRAME_LAG];
 // Vulkan semaphores
@@ -43,8 +39,6 @@ vk::Semaphore                                   g_vk_draw_complete_semaphores[FR
 vk::Semaphore                                   g_vk_image_ownership_semaphores[FRAME_LAG];
 // vulkan image in swap chain
 std::vector<vk::Image>                          g_vk_images;
-// vulkan image view in swap chain
-std::vector<vk::ImageView>                      g_vk_image_views;
 // Vulkan graphics command list
 std::vector<vk::CommandBuffer>                  g_vk_graphics_cmd;
 // Vulkan present command list
@@ -55,12 +49,8 @@ vk::SwapchainKHR                                g_vk_swapchain;
 vk::CommandPool                                 g_vk_graphics_cmd_pool;
 vk::CommandPool                                 g_vk_present_cmd_pool;
 
-// Vulkan layer count
-uint32_t                                        g_enabled_layer_count = 0;
 // Vulkan extensions
 std::vector<const char*>                        g_device_exts;
-// Vulkan instance extensions
-std::vector<const char*>                        g_instance_exts;
 // Vulkan instance layer
 std::vector<const char*>                        g_instance_layers;
 
@@ -72,10 +62,6 @@ unsigned int                                    g_frame_index;
 // Vulkan queue index
 unsigned int                                    g_graphics_queue_family_index = UINT32_MAX;
 unsigned int                                    g_present_queue_family_index = UINT32_MAX;
-
-// current window size
-uint32_t                                        g_width = 0;
-uint32_t                                        g_height = 0;
 
 // final swap chain image count
 uint32_t                                        g_swapchain_image_cnt = 0;
@@ -113,6 +99,9 @@ bool enable_gpu_validation() {
 }
 
 static bool create_vk_instance() {
+    // Vulkan instance extensions
+    std::vector<const char*> instance_exts;
+
     // get vulkan properties
     {
         bool surface_ext_found = false, platform_surface_ext_found = false;
@@ -129,12 +118,12 @@ static bool create_vk_instance() {
             for (uint32_t i = 0; i < instance_extension_count; i++) {
                 if (!strcmp(VK_KHR_SURFACE_EXTENSION_NAME, instance_extensions[i].extensionName)) {
                     surface_ext_found = 1;
-                    g_instance_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+                    instance_exts.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
                 }
 
                 if (!strcmp(VK_KHR_WIN32_SURFACE_EXTENSION_NAME, instance_extensions[i].extensionName)) {
                     platform_surface_ext_found = 1;
-                    g_instance_exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
+                    instance_exts.push_back(VK_KHR_WIN32_SURFACE_EXTENSION_NAME);
                 }
             }
         }
@@ -156,8 +145,8 @@ static bool create_vk_instance() {
             .setPApplicationInfo(&app)
             .setEnabledLayerCount((uint32_t)g_instance_layers.size())
             .setPpEnabledLayerNames(g_instance_layers.data())
-            .setEnabledExtensionCount((uint32_t)g_instance_exts.size())
-            .setPpEnabledExtensionNames(g_instance_exts.data());
+            .setEnabledExtensionCount((uint32_t)instance_exts.size())
+            .setPpEnabledExtensionNames(instance_exts.data());
 
         auto result = vk::createInstance(&inst_info, nullptr, &g_vk_instance);
         VERIFY(result);
@@ -303,13 +292,14 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     result = g_vk_physical_device.getSurfaceFormatsKHR(g_vk_surface, &format_count, surface_format.get());
     VERIFY(result);
 
+    vk::Format vk_surface_format;
     // If the format list includes just one entry of VK_FORMAT_UNDEFINED, the surface has no preferred format.  Otherwise, at least one
     // supported format will be returned.
     if (format_count == 1 && surface_format[0].format == vk::Format::eUndefined)
-        g_vk_surface_format = vk::Format::eB8G8R8A8Unorm;
+        vk_surface_format = vk::Format::eB8G8R8A8Unorm;
     else
-        g_vk_surface_format = surface_format[0].format;
-    g_vk_color_space = surface_format[0].colorSpace;
+        vk_surface_format = surface_format[0].format;
+    auto vk_color_space = surface_format[0].colorSpace;
 
     // Create semaphores to synchronize acquiring presentable buffers before
     // rendering and waiting for drawing to be complete before presenting
@@ -334,15 +324,9 @@ static bool create_swapchain(const HINSTANCE hInstnace, const HWND hwnd) {
     }
     g_frame_index = 0;
 
-    return true;
-}
-
-static bool create_buffers() {
-    vk::SwapchainKHR oldSwapchain = g_vk_swapchain;
-
     // Check the surface capabilities and formats
     vk::SurfaceCapabilitiesKHR surf_caps;
-    auto result = g_vk_physical_device.getSurfaceCapabilitiesKHR(g_vk_surface, &surf_caps);
+    result = g_vk_physical_device.getSurfaceCapabilitiesKHR(g_vk_surface, &surf_caps);
     VERIFY(result);
 
     uint32_t present_mode_count;
@@ -355,9 +339,6 @@ static bool create_buffers() {
 
     vk::Extent2D swapchainExtent;
     swapchainExtent = surf_caps.currentExtent;
-
-    g_width = surf_caps.currentExtent.width;
-    g_height = surf_caps.currentExtent.height;
 
     vk::PresentModeKHR present_mode = vk::PresentModeKHR::eFifo;
 
@@ -389,8 +370,8 @@ static bool create_buffers() {
     auto const swapchain_ci = vk::SwapchainCreateInfoKHR()
         .setSurface(g_vk_surface)
         .setMinImageCount(swapchain_image_cnt)
-        .setImageFormat(g_vk_surface_format)
-        .setImageColorSpace(g_vk_color_space)
+        .setImageFormat(vk_surface_format)
+        .setImageColorSpace(vk_color_space)
         .setImageExtent({ swapchainExtent.width, swapchainExtent.height })
         .setImageArrayLayers(1)
         .setImageUsage(vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst)
@@ -400,8 +381,7 @@ static bool create_buffers() {
         .setPreTransform(pre_transform)
         .setCompositeAlpha(compositeAlpha)
         .setPresentMode(present_mode)
-        .setClipped(true)
-        .setOldSwapchain(oldSwapchain);
+        .setClipped(true);
 
     result = g_vk_device.createSwapchainKHR(&swapchain_ci, nullptr, &g_vk_swapchain);
     VERIFY(result);
@@ -413,19 +393,6 @@ static bool create_buffers() {
     g_vk_images.resize(g_swapchain_image_cnt);
     result = g_vk_device.getSwapchainImagesKHR(g_vk_swapchain, &g_swapchain_image_cnt, g_vk_images.data());
     VERIFY(result);
-
-    // get the image views for each image in the swap chain
-    g_vk_image_views.resize(g_swapchain_image_cnt);
-    for (uint32_t i = 0; i < g_swapchain_image_cnt; ++i) {
-        auto color_image_view = vk::ImageViewCreateInfo()
-            .setViewType(vk::ImageViewType::e2D)
-            .setFormat(g_vk_surface_format)
-            .setSubresourceRange(vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1))
-            .setImage(g_vk_images[i]);
-
-        result = g_vk_device.createImageView(&color_image_view, nullptr, &g_vk_image_views[i]);
-        VERIFY(result);
-    }
 
     return true;
 }
@@ -506,10 +473,6 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
     
     // create swap chain
     if (!create_swapchain(hInstnace, hwnd))
-        return false;
-
-    // create buffers
-    if (!create_buffers())
         return false;
 
     // create command pool and commnad list
@@ -631,16 +594,16 @@ void VulkanGraphicsSample::shutdown() {
 
     g_vk_device.destroySwapchainKHR(g_vk_swapchain, nullptr);
 
-    for (uint32_t i = 0; i < g_swapchain_image_cnt; i++) {
-        g_vk_device.destroyImageView(g_vk_image_views[i], nullptr);
-        g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { g_vk_graphics_cmd[i] });
-    }
-
+    for( auto& cmd : g_vk_graphics_cmd )
+        g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { cmd });
     g_vk_device.destroyCommandPool(g_vk_graphics_cmd_pool, nullptr);
 
     if (g_use_separate_queue) {
+        for (auto& cmd : g_vk_present_cmd)
+            g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { cmd });
         g_vk_device.destroyCommandPool(g_vk_present_cmd_pool, nullptr);
     }
+
     g_vk_device.waitIdle();
     g_vk_device.destroy(nullptr);
     g_vk_instance.destroySurfaceKHR(g_vk_surface, nullptr);
