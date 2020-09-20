@@ -12,7 +12,7 @@ public:
     /*
      * Initialize graphics API.
      */
-    bool initialize(const HWND hwnd) override;
+    bool initialize(const HINSTANCE hInstnace, const HWND hwnd) override;
 
     /*
      * Render a frame.

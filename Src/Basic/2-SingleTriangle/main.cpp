@@ -70,7 +70,7 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
         return 0;
 
     // Initialize d3d12
-    const auto d3d12_initialized = g_graphics_sample->initialize(hwnd);
+    const auto d3d12_initialized = g_graphics_sample->initialize(hInInstance, hwnd);
     if (!d3d12_initialized) {
         MessageBox(nullptr, L"Failed to initialized d3d12.", L"Error", MB_OK);
         return -1;

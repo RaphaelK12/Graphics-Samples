@@ -556,7 +556,7 @@ bool create_pso() {
  *   - create the geometry data
  *   - create pipeline state object
  */
-bool D3D12GraphicsSample::initialize(const HWND hwnd) {
+bool D3D12GraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     auto ret = enum_adapter();
     if (!ret)
         return false;

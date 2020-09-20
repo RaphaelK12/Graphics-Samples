@@ -49,7 +49,7 @@ endif()
 
 add_executable(SingleTriangle ${all_files})
 
-target_link_libraries( SingleTriangle "d3d12.lib" "dxgi.lib" "dxguid.lib" "d3dcompiler.lib")
+target_link_libraries( SingleTriangle "d3d12.lib" "dxgi.lib" "dxguid.lib" "d3dcompiler.lib" "vulkan-1.lib")
 
 # setup correct output name for different configurations
 set_target_properties( SingleTriangle PROPERTIES RELEASE_OUTPUT_NAME "1_single_triangle_r" )
