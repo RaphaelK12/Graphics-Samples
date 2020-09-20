@@ -13,28 +13,29 @@
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vk_sdk_platform.h>
 
-// This tutorial demonstrates how to initialize Vulkan and clear the back buffer every frame.
-//
-// Followings are the basic steps to initialize a Vulkan application.
-//    - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
-//    - Create Vulkan instance
-//    - Enumerate vulkan physical devices and use the first one
-//    - Create Vulkan surface
-//    - Enumerate all available queues and pick a graphics queue and present queue
-//      - Graphics queue can be different with present queue in this demo
-//    - Create Vulkan swapchain
-//      - Get all vulkan images in the swapchain
-//    - Create command pool and command buffers
-//      - May need separate command pool and buffers for present operations if a separate present queue is used.
-//
-// Apart from its initialization, this tutorial also demonstrate the following things
-//    - How to properly sycnronize cpu and gpu with vulkan fences.
-//    - Acquiring image from swapchain.
-//    - Generating a command buffer.
-//    - Clearing an image.
-//    - Present a frame.
-//    - Proper transition of an image.
-
+/*
+    This tutorial demonstrates how to initialize Vulkan and clear the back buffer every frame.
+    
+    Followings are the basic steps to initialize a Vulkan application.
+       - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
+       - Create Vulkan instance
+       - Enumerate vulkan physical devices and use the first one
+       - Create Vulkan surface
+       - Enumerate all available queues and pick a graphics queue and present queue
+         - Graphics queue can be different with present queue in this demo
+       - Create Vulkan swapchain
+         - Get all vulkan images in the swapchain
+       - Create command pool and command buffers
+         - May need separate command pool and buffers for present operations if a separate present queue is used.
+    
+    Apart from its initialization, this tutorial also demonstrate the following things
+       - How to properly sycnronize cpu and gpu with vulkan fences.
+       - Acquiring image from swapchain.
+       - Generating a command buffer.
+       - Clearing an image.
+       - Present a frame.
+       - Proper transition of an image.
+*/
 
 // Allow a maximum of two outstanding presentation operations.
 #define FRAME_LAG 2

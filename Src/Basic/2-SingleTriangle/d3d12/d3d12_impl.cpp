@@ -10,6 +10,15 @@
 #include <d3dcompiler.h>
 #include "d3d12_impl.h"
 
+/*
+    This tutorial demonstrate how to draw a single triangle on screen.
+    It demonstrates the following things on d3d12.
+        - How to create an empty root-signature.
+        - How to create input-layout and vertex buffer.
+        - Very basic vertex shader and pixel shader.
+        - Creating pipeline state object.
+*/
+
 using Microsoft::WRL::ComPtr;
 
 // Different from d3d11, which implicitly accumulate command buffers of three frames and stall CPU pipeline if it is
