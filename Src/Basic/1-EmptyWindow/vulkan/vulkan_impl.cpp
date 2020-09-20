@@ -630,7 +630,9 @@ void VulkanGraphicsSample::render_frame() {
                                                         vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
         image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
-        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
+
+        if(g_use_separate_queue)
+            image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
 
         g_vk_graphics_cmd[g_frame_index].end();
     }

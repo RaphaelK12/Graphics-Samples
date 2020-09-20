@@ -34,13 +34,9 @@ vk::PhysicalDevice                              g_vk_physical_device;
 // device is neither for issuing draw calls, nor for submitting command buffers.
 vk::Device                                      g_vk_device;
 // Vulkan graphics queue and present queue
-// Most of the time graphics queue will have present feature, meaning it is almost true all the time this tutorial won't use separate
-// queues for graphics and presenting. As a matter of fact, on GCN hardware, there is no dedicated present queue hardware unit at all.
-// Engines, like UE4, don't handle separate present command queue.
-// However, there is no gurrantee that future hardware won't have a present queue. Since this is in Vulkan spec, it is explicitly handled
-// in this tutorial.
+// Unlike the EmptyWindow tutorial, which handles the corner case that graphics queue doesn't support present.
+// This tutorial will assume the graphics queue always support present so that lots of logic can be simplified by a lot.
 vk::Queue                                       g_vk_graphics_queue;
-vk::Queue                                       g_vk_present_queue;
 // Vulkan swapchain surface
 vk::SurfaceKHR                                  g_vk_surface;
 // Vulkan swap chain
@@ -51,12 +47,9 @@ vk::Image                                       g_vk_images[NUM_FRAMES];
 // Vulkan command pool
 // Command pool keeps track of all memory for command buffers.
 vk::CommandPool                                 g_vk_graphics_cmd_pool;
-vk::CommandPool                                 g_vk_present_cmd_pool;
 // Vulkan command list
 // In this tutorial, nothing, but clearing the backbuffer is done in this command list.
-// In the case of separate present queue, the present command list will do proper resource transition.
 vk::CommandBuffer                               g_vk_graphics_cmd[NUM_FRAMES];
-vk::CommandBuffer                               g_vk_present_cmd[NUM_FRAMES];
 // Vulkan fences
 // Fence objects are for CPU to wait for certain operations on GPU to be done. We can write a fence on command buffer to indicate the
 // previous operations are all done. CPU can choose to wait for fence to make sure the commands of its interest are already executed on
@@ -75,11 +68,8 @@ vk::Semaphore                                   g_vk_image_ownership_semaphores[
 std::vector<const char*>                        g_device_exts;
 // Vulkan instance layer
 std::vector<const char*>                        g_instance_layers;
-// Whether there are separate graphics and present queue
-bool                                            g_use_separate_queue;
 // Vulkan queue index
 unsigned int                                    g_graphics_queue_family_index = UINT32_MAX;
-unsigned int                                    g_present_queue_family_index = UINT32_MAX;
 // Current frame index
 unsigned int                                    g_frame_index = 0;
 
@@ -259,28 +249,13 @@ static bool create_vk_device(const HINSTANCE hInstnace, const HWND hwnd) {
                 g_graphics_queue_family_index = i;
             }
 
-            if (supportsPresent[i] == VK_TRUE)
-                g_present_queue_family_index = i;
-            break;
-        }
-    }
-
-    // The graphics queue doesn't support present, we need to use a separate queue to present.
-    if (g_present_queue_family_index == UINT32_MAX) {
-        for (uint32_t i = 0; i < queue_family_count; ++i) {
-            if (supportsPresent[i] == VK_TRUE) {
-                g_present_queue_family_index = i;
-                break;
-            }
+            assert(supportsPresent[i] == VK_TRUE);
         }
     }
 
     // Generate error if could not find both a graphics and a present queue
-    if (g_graphics_queue_family_index == UINT32_MAX || g_present_queue_family_index == UINT32_MAX)
+    if (g_graphics_queue_family_index == UINT32_MAX)
         return false;
-
-    // Whether we are using separate command queues for graphics and presenting
-    g_use_separate_queue = g_graphics_queue_family_index != g_present_queue_family_index;
 
     // Create vulkan device
     {
@@ -300,13 +275,6 @@ static bool create_vk_device(const HINSTANCE hInstnace, const HWND hwnd) {
             .setPpEnabledExtensionNames((const char* const*)g_device_exts.data())
             .setPEnabledFeatures(nullptr);
 
-        if (g_use_separate_queue) {
-            queues[1].setQueueFamilyIndex(g_present_queue_family_index);
-            queues[1].setQueueCount(1);
-            queues[1].setPQueuePriorities(priorities);
-            deviceInfo.setQueueCreateInfoCount(2);
-        }
-
         auto result = g_vk_physical_device.createDevice(&deviceInfo, nullptr, &g_vk_device);
         VERIFY(result);
     }
@@ -320,7 +288,6 @@ static bool create_vk_device(const HINSTANCE hInstnace, const HWND hwnd) {
  */
 static bool acquire_vk_command_queue() {
     g_vk_device.getQueue(g_graphics_queue_family_index, 0, &g_vk_graphics_queue);
-    g_vk_device.getQueue(g_present_queue_family_index, 0, &g_vk_present_queue);
     return true;
 }
 
@@ -450,11 +417,6 @@ static bool create_vk_sychronization_objs() {
 
         result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_draw_complete_semaphores[i]);
         VERIFY(result);
-
-        if (g_use_separate_queue) {
-            result = g_vk_device.createSemaphore(&semaphoreCreateInfo, nullptr, &g_vk_image_ownership_semaphores[i]);
-            VERIFY(result);
-        }
     }
 
     return true;
@@ -483,25 +445,6 @@ static bool create_vk_command() {
     for (uint32_t i = 0; i < NUM_FRAMES; ++i) {
         result = g_vk_device.allocateCommandBuffers(&cmd, &g_vk_graphics_cmd[i]);
         VERIFY(result);
-    }
-
-    if (g_use_separate_queue) {
-        auto const present_cmd_pool_info = vk::CommandPoolCreateInfo()
-            .setQueueFamilyIndex(g_present_queue_family_index)
-            .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
-
-        result = g_vk_device.createCommandPool(&present_cmd_pool_info, nullptr, &g_vk_present_cmd_pool);
-        VERIFY(result);
-
-        auto const present_cmd = vk::CommandBufferAllocateInfo()
-            .setCommandPool(g_vk_present_cmd_pool)
-            .setLevel(vk::CommandBufferLevel::ePrimary)
-            .setCommandBufferCount(1);
-
-        for (uint32_t i = 0; i < NUM_FRAMES; i++) {
-            result = g_vk_device.allocateCommandBuffers(&present_cmd, &g_vk_present_cmd[i]);
-            VERIFY(result);
-        }
     }
 
     return true;
@@ -536,12 +479,10 @@ void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, 
  *   - Create Vulkan instance
  *   - Enumerate vulkan physical devices and use the first one
  *   - Create Vulkan surface
- *   - Enumerate all available queues and pick a graphics queue and present queue
- *     - Graphics queue can be different with present queue in this demo
+ *   - Enumerate all available queues and pick a graphics queue and it needs to support present too
  *   - Create Vulkan swapchain
  *     - Get all vulkan images in the swapchain
  *   - Create command pool and command buffers
- *     - May need separate command pool and buffers for present operations if a separate present queue is used.
  */
 bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd) {
     // enable gpu validation if needed
@@ -622,7 +563,6 @@ void VulkanGraphicsSample::render_frame() {
             vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
 
         image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
-        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
 
         g_vk_graphics_cmd[g_frame_index].end();
     }
@@ -637,44 +577,17 @@ void VulkanGraphicsSample::render_frame() {
         .setSignalSemaphoreCount(1)
         .setPSignalSemaphores(&g_vk_draw_complete_semaphores[g_frame_index]);
 
-    result = g_vk_graphics_queue.submit(1, &submit_info, g_use_separate_queue ? vk::Fence() : g_vk_fence[g_frame_index]);
+    result = g_vk_graphics_queue.submit(1, &submit_info, g_vk_fence[g_frame_index]);
     assert(result == vk::Result::eSuccess);
-
-    if (g_use_separate_queue) {
-        g_vk_present_cmd[g_frame_index].reset((vk::CommandBufferResetFlags)0);
-
-        auto const commandInfo = vk::CommandBufferBeginInfo().setFlags(vk::CommandBufferUsageFlagBits::eSimultaneousUse);
-        auto result = g_vk_present_cmd[g_frame_index].begin(&commandInfo);
-
-        image_transition<vk::ImageLayout::ePresentSrcKHR, vk::ImageLayout::ePresentSrcKHR>(g_vk_present_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_present_queue_family_index);
-
-        g_vk_present_cmd[g_frame_index].end();
-
-        // If we are using separate queues, change image ownership to the
-        // present queue before presenting, waiting for the draw complete
-        // semaphore and signalling the ownership released semaphore when
-        // finished
-        auto const present_submit_info = vk::SubmitInfo()
-            .setPWaitDstStageMask(&pipe_stage_flags)
-            .setWaitSemaphoreCount(1)
-            .setPWaitSemaphores(&g_vk_draw_complete_semaphores[g_frame_index])
-            .setCommandBufferCount(1)
-            .setPCommandBuffers(&g_vk_present_cmd[g_frame_index])
-            .setSignalSemaphoreCount(1)
-            .setPSignalSemaphores(&g_vk_image_ownership_semaphores[g_frame_index]);
-
-        result = g_vk_present_queue.submit(1, &present_submit_info, g_vk_fence[g_frame_index]);
-        assert(result == vk::Result::eSuccess);
-    }
 
     auto const presentInfo = vk::PresentInfoKHR()
         .setWaitSemaphoreCount(1)
-        .setPWaitSemaphores(g_use_separate_queue ? &g_vk_image_ownership_semaphores[g_frame_index] : &g_vk_draw_complete_semaphores[g_frame_index])
+        .setPWaitSemaphores(&g_vk_draw_complete_semaphores[g_frame_index])
         .setSwapchainCount(1)
         .setPSwapchains(&g_vk_swapchain)
         .setPImageIndices(&current_buffer);
 
-    result = g_vk_present_queue.presentKHR(&presentInfo);
+    result = g_vk_graphics_queue.presentKHR(&presentInfo);
     assert(result == vk::Result::eSuccess);
 
     g_frame_index += 1;
@@ -692,8 +605,6 @@ void VulkanGraphicsSample::shutdown() {
         g_vk_device.destroyFence(g_vk_fence[i], nullptr);
         g_vk_device.destroySemaphore(g_vk_image_acquired_semaphores[i], nullptr);
         g_vk_device.destroySemaphore(g_vk_draw_complete_semaphores[i], nullptr);
-        if (g_use_separate_queue)
-            g_vk_device.destroySemaphore(g_vk_image_ownership_semaphores[i], nullptr);
     }
 
     g_vk_device.destroySwapchainKHR(g_vk_swapchain, nullptr);
@@ -701,12 +612,6 @@ void VulkanGraphicsSample::shutdown() {
     for (auto& cmd : g_vk_graphics_cmd)
         g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { cmd });
     g_vk_device.destroyCommandPool(g_vk_graphics_cmd_pool, nullptr);
-
-    if (g_use_separate_queue) {
-        for (auto& cmd : g_vk_present_cmd)
-            g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { cmd });
-        g_vk_device.destroyCommandPool(g_vk_present_cmd_pool, nullptr);
-    }
 
     g_vk_device.waitIdle();
     g_vk_device.destroy(nullptr);
