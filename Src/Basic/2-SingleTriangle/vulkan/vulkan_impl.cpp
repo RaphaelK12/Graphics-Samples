@@ -50,6 +50,13 @@ vk::CommandPool                                 g_vk_graphics_cmd_pool;
 // Vulkan command list
 // In this tutorial, nothing, but clearing the backbuffer is done in this command list.
 vk::CommandBuffer                               g_vk_graphics_cmd[NUM_FRAMES];
+// Pipeline layout
+// Description of vertex buffer layout.
+vk::PipelineLayout                              g_vk_pipeline_layout;
+// Pipeline cache
+vk::PipelineCache                               g_vk_pipeline_cache;
+// Pipeline state
+vk::Pipeline                                    g_vk_pipeline;
 // Vulkan fences
 // Fence objects are for CPU to wait for certain operations on GPU to be done. We can write a fence on command buffer to indicate the
 // previous operations are all done. CPU can choose to wait for fence to make sure the commands of its interest are already executed on
@@ -473,6 +480,87 @@ void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, 
 
 
 /*
+ * Create graphics pipeline.
+ */
+static bool create_gp() {
+#if 0
+    // wait for shader to be ready
+    vk::PipelineCacheCreateInfo const pipeline_cache_info;
+    auto result = g_vk_device.createPipelineCache(&pipeline_cache_info, nullptr, &g_vk_pipeline_cache);
+    VERIFY(result);
+
+    // descriptor layout
+    auto const pipeline_layout_create_info = vk::PipelineLayoutCreateInfo().setSetLayoutCount(0);
+    result = g_vk_device.createPipelineLayout(&pipeline_layout_create_info, nullptr, &g_vk_pipeline_layout);
+    VERIFY(result);
+
+    // vertex format layout
+    vk::VertexInputAttributeDescription vertex_input_attr_descs[] = {
+        vk::VertexInputAttributeDescription(),
+        vk::VertexInputAttributeDescription()
+    };
+    auto const vertex_input_layout = vk::PipelineVertexInputStateCreateInfo()
+                                .setVertexAttributeDescriptionCount(2)
+                                .setPVertexAttributeDescriptions(vertex_input_attr_descs);
+    
+    // input assembly info
+    auto const input_assembler_info = vk::PipelineInputAssemblyStateCreateInfo()
+                                .setTopology(vk::PrimitiveTopology::eTriangleList);
+
+    // rasterizer information
+    auto const rasterizer_info = vk::PipelineRasterizationStateCreateInfo()
+                                .setDepthClampEnable(VK_FALSE)
+                                .setRasterizerDiscardEnable(VK_FALSE)
+                                .setPolygonMode(vk::PolygonMode::eFill)
+                                .setCullMode(vk::CullModeFlagBits::eNone)
+                                .setFrontFace(vk::FrontFace::eCounterClockwise)
+                                .setDepthBiasEnable(VK_FALSE);
+
+    // depth stencil info
+    auto const depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo()
+                                .setDepthTestEnable(VK_FALSE)
+                                .setDepthWriteEnable(VK_FALSE);
+    
+    // color blend state
+    vk::PipelineColorBlendAttachmentState const color_blend[1] = {
+        vk::PipelineColorBlendAttachmentState().setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                                                                  vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA) };
+    auto const color_blend_state =
+        vk::PipelineColorBlendStateCreateInfo().setAttachmentCount(1).setPAttachments(color_blend);
+
+    // dynamic state
+    vk::DynamicState const dynamic_states[2] = { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+    auto const dynamic_state_info = vk::PipelineDynamicStateCreateInfo().setPDynamicStates(dynamic_states).setDynamicStateCount(2);
+
+    // multi sample info
+    auto const multi_sample_info = vk::PipelineMultisampleStateCreateInfo();
+
+    // viewport info
+    auto const viewport_info = vk::PipelineViewportStateCreateInfo().setViewportCount(1).setScissorCount(1);
+
+    // pipeline create info
+    auto const pipeline = vk::GraphicsPipelineCreateInfo()
+                                .setStageCount(2)
+                                .setPVertexInputState(&vertex_input_layout)
+                                .setPInputAssemblyState(&input_assembler_info)
+                                .setPRasterizationState(&rasterizer_info)
+                                .setPDepthStencilState(&depth_stencil_info)
+                                .setPViewportState(&viewport_info)
+                                // .setPStages(shaderStageInfo) to be done
+                                .setPColorBlendState(&color_blend_state)
+                                .setLayout(g_vk_pipeline_layout)
+                                .setPDynamicState(&dynamic_state_info)
+                                .setPMultisampleState(&multi_sample_info);
+
+    result = g_vk_device.createGraphicsPipelines(g_vk_pipeline_cache, 1, &pipeline, nullptr, &g_vk_pipeline);
+    VERIFY(result);
+
+#endif
+
+    return true;
+}
+
+/*
  * Initialize the vulkan sample.
  * Followings are the basic steps to initialize a Vulkan application.
  *   - [Opt] Enable Vulkan validataion ( This is only active on debug build. )
@@ -518,6 +606,10 @@ bool VulkanGraphicsSample::initialize(const HINSTANCE hInstnace, const HWND hwnd
 
     // create fence and semaphores
     if (!create_vk_sychronization_objs())
+        return false;
+
+    // create graphics pipeline
+    if (!create_gp())
         return false;
 
     return true;
@@ -612,6 +704,12 @@ void VulkanGraphicsSample::shutdown() {
     for (auto& cmd : g_vk_graphics_cmd)
         g_vk_device.freeCommandBuffers(g_vk_graphics_cmd_pool, { cmd });
     g_vk_device.destroyCommandPool(g_vk_graphics_cmd_pool, nullptr);
+
+#if 0
+    g_vk_device.destroyPipeline(g_vk_pipeline);
+    g_vk_device.destroyPipelineCache(g_vk_pipeline_cache);
+    g_vk_device.destroyPipelineLayout(g_vk_pipeline_layout);
+#endif
 
     g_vk_device.waitIdle();
     g_vk_device.destroy(nullptr);

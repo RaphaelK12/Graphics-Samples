@@ -28,6 +28,8 @@ static inline LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, L
         g_quiting = true;
         break;
     case WM_PAINT:
+        // render a frame
+        g_graphics_sample->render_frame();
         return 0;
     default:
         return DefWindowProc(hWnd, message, wParam, lParam);
@@ -89,9 +91,6 @@ int WINAPI WinMain(HINSTANCE hInInstance, HINSTANCE hPrevInstance, char* lpCmdLi
 
         if (g_quiting)
             break;
-
-        // render a frame
-        g_graphics_sample->render_frame();
     }
 
     g_graphics_sample->shutdown();

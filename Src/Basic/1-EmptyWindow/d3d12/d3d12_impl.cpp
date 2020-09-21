@@ -36,21 +36,21 @@ static ComPtr<ID3D12CommandQueue>           g_command_queue = nullptr;
 static ComPtr<IDXGISwapChain4>              g_swap_chain = nullptr;
 // The three back buffers acquired from the swap chain.
 static ComPtr<ID3D12Resource>               g_back_buffers[NUM_FRAMES] = { nullptr, nullptr, nullptr };
-// A command list only translate the GPU command into commands of correct format. It doesn't keep the command buffer memory, 
-// the command allocator does.
-static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES] = { nullptr, nullptr, nullptr };
 // Different from d3d11, command list is an exposed data structure and it is responsible for pushing GPU commands in a 
 // command buffer. A program can have multiple of command lists and have different thread pushing GPU commands to different 
 // command list, this is how d3d12 greatly reduce the CPU overhead of API calls. Though, it is not demonstrated in this 
 // tutorial.
 static ComPtr<ID3D12GraphicsCommandList>    g_command_list = nullptr;
-// Fence object is used to make sure CPU is never too fast. In this tutorial, if it is 3 frames ahead of GPU, it will be 
-// stalled.
-static ComPtr<ID3D12Fence>                  g_fence = nullptr;
 // Descriptor is a new concept in d3d12, descriptor is what we use to describe a resource and have them linked to graphics
 // pipeline. Unlike d3d11, the memory management is explicitly, no memory allocation under the hood of API. In order to
 // allocate a descriptor, we need a descriptor heap, which is responsible for keeping all descriptors memory alive.
 static ComPtr<ID3D12DescriptorHeap>         g_descriptor_heap = nullptr;
+// A command list only translate the GPU command into commands of correct format. It doesn't keep the command buffer memory, 
+// the command allocator does.
+static ComPtr<ID3D12CommandAllocator>       g_command_list_allocators[NUM_FRAMES] = { nullptr, nullptr, nullptr };
+// Fence object is used to make sure CPU is never too fast. In this tutorial, if it is 3 frames ahead of GPU, it will be 
+// stalled.
+static ComPtr<ID3D12Fence>                  g_fence = nullptr;
 
 // Following are some generic data of this tutorial program.
 
