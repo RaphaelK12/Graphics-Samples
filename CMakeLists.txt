@@ -72,6 +72,14 @@ endmacro(source_group_by_dir)
 # a helper macro to keep track of the root dir
 set(PROJECT_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
+# find the executable to generate shader header files
+find_program(GLSLANG_VALIDATOR NAMES glslangValidator HINTS ${PROJECT_ROOT_DIR}/Dependencies )
+# find the python script to generate spirv headers
+find_program(SPIRV_GENERATE_SCRIPT NAMES generate_spirv.py HINTS ${PROJECT_ROOT_DIR}/Scripts )
+
+# fine python
+find_package(Python REQUIRED)
+
 # enable groupping projects in folders
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 

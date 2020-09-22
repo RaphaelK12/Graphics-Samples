@@ -18,15 +18,13 @@ jobs:
       with:
         python-version: '3.x'
         architecture: 'x64'
-    - name: Generate Shader Sources
-      run: python Script/generate_shaders.py
     - name: Get Cache Directory
       id: cache-dir
       run: |
            echo ::set-output name=dir::%CD%
       shell: cmd
     - name: Load Dependencies from Cache
-      uses: actions/cache@v1
+      uses: actions/cache@v2
       id: cache-dep
       with:
         path: ${{ steps.cache-dir.outputs.dir }}/Dependencies

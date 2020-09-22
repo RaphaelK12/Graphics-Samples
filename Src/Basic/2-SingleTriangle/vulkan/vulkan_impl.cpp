@@ -7,6 +7,8 @@
 #include <windows.h>
 #include <memory>
 #include "vulkan_impl.h"
+#include "shaders/generated_vs.h"
+#include "shaders/generated_ps.h"
 
 #define VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_TYPESAFE_CONVERSION
@@ -554,9 +556,7 @@ static bool create_gp() {
 
     result = g_vk_device.createGraphicsPipelines(g_vk_pipeline_cache, 1, &pipeline, nullptr, &g_vk_pipeline);
     VERIFY(result);
-
 #endif
-
     return true;
 }
 
