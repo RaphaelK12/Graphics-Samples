@@ -19,7 +19,7 @@ jobs:
         python-version: '3.x'
         architecture: 'x64'
     - name: Generate Shader Sources
-      run: Script/generate_shaders.py
+      run: python Script/generate_shaders.py
     - name: Get Cache Directory
       id: cache-dir
       run: |
