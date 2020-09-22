@@ -72,10 +72,17 @@ endmacro(source_group_by_dir)
 # a helper macro to keep track of the root dir
 set(PROJECT_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
+# vulkan sdk dir
+set(VULKAN_SDK_DIR "${PROJECT_ROOT_DIR}/Dependencies/VulkanSDK(1.2.148.0)")
+
 # find the executable to generate shader header files
-find_program(GLSLANG_VALIDATOR NAMES glslangValidator HINTS ${PROJECT_ROOT_DIR}/Dependencies )
+find_program(GLSLANG_VALIDATOR NAMES glslangValidator HINTS ${VULKAN_SDK_DIR}/Bin )
 # find the python script to generate spirv headers
 find_program(SPIRV_GENERATE_SCRIPT NAMES generate_spirv.py HINTS ${PROJECT_ROOT_DIR}/Scripts )
+
+MARK_AS_ADVANCED(VULKAN_SDK_DIR)
+MARK_AS_ADVANCED(GLSLANG_VALIDATOR)
+MARK_AS_ADVANCED(SPIRV_GENERATE_SCRIPT)
 
 # fine python
 find_package(Python REQUIRED)
