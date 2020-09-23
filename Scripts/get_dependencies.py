@@ -46,6 +46,8 @@ else:
     # if there is a broken dependencies folder, it will fail to build
     if os.path.isdir(dep_dir) is False:
         sync_dep = True
+    else:
+        print('Dependencies are up to date, no need to sync.')
     
 # sync dependencies if needed
 if sync_dep:
