@@ -27,8 +27,6 @@ def identifierize(s):
     # translate leading digits
     return re.sub("^[^a-zA-Z_]+", "_", s)
 
-print("generating shaders")
-
 # compile glsl code to spirv
 def compile(filename, tmpfile):
     # invoke glslangValidator

@@ -7,17 +7,51 @@
 set PROJECT_ROOT_DIR=%~dp0
 
 rem reset all variables first
-call "%PROJECT_ROOT_DIR%\BuildFiles\Win\reset_arguments.cmd"
+set BUILD_RELEASE=
+set BUILD_HYBRID=
+set BUILD_DEBUG=
+set CLEAN=
+set UPDATE=
+set UPDATE_DEP=
+set FORCE_UPDATE_DEP=
 
 rem parse arguments
-call "%PROJECT_ROOT_DIR%\BuildFiles\Win\parse_arguments.cmd" %*
-if errorlevel 1 goto EOF
+:argv_loop
+if NOT "%1" == "" (
+    if "%1" == "clean" (
+        set CLEAN=1
+        goto EOF
+    )else if "%1" == "update" (
+        set UPDATE=1
+        goto EOF
+    )else if "%1" == "release" (
+        set BUILD_RELEASE=1
+        goto EOF
+    )else if "%1" == "debug" (
+        set BUILD_DEBUG=1
+        goto EOF
+    )else if "%1" == "update_dep" (
+        set UPDATE_DEP=1
+        goto EOF
+    )else if "%1" == "force_update_dep" (
+        set FORCE_UPDATE_DEP=1
+        goto EOF
+    )else (
+        echo Unrecognized Command
+        goto EOF
+    )
+)else if "%1" == "" (
+    set BUILD_RELEASE=1
+    goto EOF
+)
+
+:EOF
 
 if "%BUILD_RELEASE%" == "1" (
     echo [33mBuilding release[0m
 
-    :: create the resource folder since fxc will fail to write files in that folder
-    powershell New-Item -Force -ItemType directory -Path Bin/Resources/Shaders
+    :: sync dependencies if needed
+    python ./Scripts/get_dependencies.py
 
     powershell New-Item -Force -ItemType directory -Path Temp/Release
 	cd Temp/Release
@@ -35,8 +69,8 @@ if "%BUILD_RELEASE%" == "1" (
 if "%BUILD_DEBUG%" == "1" (
     echo [33mBuilding debug[0m
 
-    :: create the resource folder since fxc will fail to write files in that folder
-    powershell New-Item -Force -ItemType directory -Path Bin/Resources/Shaders
+    :: sync dependencies if needed
+    python ./Scripts/get_dependencies.py
 
     powershell New-Item -Force -ItemType directory -Path Temp/Debug
 	cd Temp/Debug
@@ -64,7 +98,18 @@ if "%UPDATE%" == "1" (
 
 if "%UPDATE_DEP%" == "1" (
 	echo [33mDownloading dependencies[0m
-	powershell .\BuildFiles\win\getdep.ps1
+
+	python ./Scripts/get_dependencies.py
+
+    goto BUILD_SUCCEEED
+)
+
+if "%FORCE_UPDATE_DEP%" == "1" (
+    echo [33mDownloading dependencies[0m
+
+	python ./Scripts/get_dependencies.py TRUE
+
+    goto BUILD_SUCCEEED
 )
 
 :BUILD_SUCCEEED
