@@ -72,6 +72,9 @@ vk::Fence                                       g_vk_fence[NUM_FRAMES];
 vk::Semaphore                                   g_vk_image_acquired_semaphores[NUM_FRAMES];
 vk::Semaphore                                   g_vk_draw_complete_semaphores[NUM_FRAMES];
 vk::Semaphore                                   g_vk_image_ownership_semaphores[NUM_FRAMES];
+// Shader modules
+vk::ShaderModule                                g_vk_vs_module;
+vk::ShaderModule                                g_vk_ps_module;
 
 // Vulkan extensions
 std::vector<const char*>                        g_device_exts;
@@ -485,7 +488,9 @@ void image_transition(vk::CommandBuffer& cb, const unsigned int current_buffer, 
  * Create graphics pipeline.
  */
 static bool create_gp() {
-#if 0
+    // temporarily return true before I have a render pass
+    return true;
+
     // wait for shader to be ready
     vk::PipelineCacheCreateInfo const pipeline_cache_info;
     auto result = g_vk_device.createPipelineCache(&pipeline_cache_info, nullptr, &g_vk_pipeline_cache);
@@ -498,12 +503,18 @@ static bool create_gp() {
 
     // vertex format layout
     vk::VertexInputAttributeDescription vertex_input_attr_descs[] = {
-        vk::VertexInputAttributeDescription(),
-        vk::VertexInputAttributeDescription()
+        vk::VertexInputAttributeDescription().setOffset(0).setFormat(vk::Format::eR32G32B32A32Sfloat).setBinding(0).setLocation(0),
+        vk::VertexInputAttributeDescription().setOffset(16).setFormat(vk::Format::eR8G8B8A8Unorm).setBinding(0).setLocation(1)
     };
+    const auto vertex_input_binding_descs = std::array<vk::VertexInputBindingDescription, 2>({
+        vk::VertexInputBindingDescription().setBinding(0).setStride(20).setInputRate(vk::VertexInputRate::eVertex),
+        vk::VertexInputBindingDescription().setBinding(1).setStride(20).setInputRate(vk::VertexInputRate::eVertex),
+    });
     auto const vertex_input_layout = vk::PipelineVertexInputStateCreateInfo()
                                 .setVertexAttributeDescriptionCount(2)
-                                .setPVertexAttributeDescriptions(vertex_input_attr_descs);
+                                .setPVertexAttributeDescriptions(vertex_input_attr_descs)
+                                .setVertexBindingDescriptionCount(2)
+                                .setVertexBindingDescriptions(vertex_input_binding_descs);
     
     // input assembly info
     auto const input_assembler_info = vk::PipelineInputAssemblyStateCreateInfo()
@@ -516,7 +527,8 @@ static bool create_gp() {
                                 .setPolygonMode(vk::PolygonMode::eFill)
                                 .setCullMode(vk::CullModeFlagBits::eNone)
                                 .setFrontFace(vk::FrontFace::eCounterClockwise)
-                                .setDepthBiasEnable(VK_FALSE);
+                                .setDepthBiasEnable(VK_FALSE)
+                                .setLineWidth(1.0f);
 
     // depth stencil info
     auto const depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo()
@@ -540,6 +552,23 @@ static bool create_gp() {
     // viewport info
     auto const viewport_info = vk::PipelineViewportStateCreateInfo().setViewportCount(1).setScissorCount(1);
 
+    // create vertex shader module
+    {
+        const auto moduleCreateInfo = vk::ShaderModuleCreateInfo().setCodeSize(sizeof(vs_vert_glsl)).setPCode(vs_vert_glsl);
+        auto result = g_vk_device.createShaderModule(&moduleCreateInfo, nullptr, &g_vk_vs_module);
+        VERIFY(result);
+    }
+    // create pixel shader module
+    {
+        const auto moduleCreateInfo = vk::ShaderModuleCreateInfo().setCodeSize(sizeof(ps_frag_glsl)).setPCode(ps_frag_glsl);
+        auto result = g_vk_device.createShaderModule(&moduleCreateInfo, nullptr, &g_vk_ps_module);
+        VERIFY(result);
+    }
+
+    vk::PipelineShaderStageCreateInfo const shaderStageInfo[2] = {
+        vk::PipelineShaderStageCreateInfo().setStage(vk::ShaderStageFlagBits::eVertex).setModule(g_vk_vs_module).setPName("main"),
+        vk::PipelineShaderStageCreateInfo().setStage(vk::ShaderStageFlagBits::eFragment).setModule(g_vk_ps_module).setPName("main") };
+
     // pipeline create info
     auto const pipeline = vk::GraphicsPipelineCreateInfo()
                                 .setStageCount(2)
@@ -548,7 +577,7 @@ static bool create_gp() {
                                 .setPRasterizationState(&rasterizer_info)
                                 .setPDepthStencilState(&depth_stencil_info)
                                 .setPViewportState(&viewport_info)
-                                // .setPStages(shaderStageInfo) to be done
+                                .setPStages(shaderStageInfo)
                                 .setPColorBlendState(&color_blend_state)
                                 .setLayout(g_vk_pipeline_layout)
                                 .setPDynamicState(&dynamic_state_info)
@@ -556,7 +585,7 @@ static bool create_gp() {
 
     result = g_vk_device.createGraphicsPipelines(g_vk_pipeline_cache, 1, &pipeline, nullptr, &g_vk_pipeline);
     VERIFY(result);
-#endif
+
     return true;
 }
 
