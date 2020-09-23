@@ -51,7 +51,7 @@ if "%BUILD_RELEASE%" == "1" (
     echo [33mBuilding release[0m
 
     :: sync dependencies if needed
-    python ./Scripts/get_dependencies.py
+    py ./Scripts/get_dependencies.py
 
     powershell New-Item -Force -ItemType directory -Path Temp/Release
 	cd Temp/Release
@@ -70,7 +70,7 @@ if "%BUILD_DEBUG%" == "1" (
     echo [33mBuilding debug[0m
 
     :: sync dependencies if needed
-    python ./Scripts/get_dependencies.py
+    py ./Scripts/get_dependencies.py
 
     powershell New-Item -Force -ItemType directory -Path Temp/Debug
 	cd Temp/Debug
@@ -99,7 +99,7 @@ if "%UPDATE%" == "1" (
 if "%UPDATE_DEP%" == "1" (
 	echo [33mDownloading dependencies[0m
 
-	python ./Scripts/get_dependencies.py
+	py ./Scripts/get_dependencies.py
 
     goto BUILD_SUCCEEED
 )
@@ -107,7 +107,7 @@ if "%UPDATE_DEP%" == "1" (
 if "%FORCE_UPDATE_DEP%" == "1" (
     echo [33mDownloading dependencies[0m
 
-	python ./Scripts/get_dependencies.py TRUE
+	py ./Scripts/get_dependencies.py TRUE
 
     goto BUILD_SUCCEEED
 )
