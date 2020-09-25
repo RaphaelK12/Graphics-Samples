@@ -11,6 +11,7 @@
 #include "shaders/generated_ps.h"
 #include "shaders/generated_vs.h"
 #include "d3d12_impl.h"
+#include "../common/common.h"
 
 /*
     This tutorial demonstrate how to draw a single triangle on screen.
@@ -87,38 +88,6 @@ D3D12_INDEX_BUFFER_VIEW                     g_index_buffer_view;
 unsigned int                                g_window_width = 0;
 unsigned int                                g_window_height = 0;
 
-// Following are definition of vertices data
-
-struct float3 {
-    float x, y, z;
-};
-
-/*
- * Each vertex only has position and color in it. For simplicity, position data are already defined in NDC, no transformation is
- * needed in vertex shader anymore.
- */
-struct Vertex{
-    float3 position;    // clip space position
-    float3 color;       // a color for each vertex
-};
-
-/*
- * There are only three vertices, it is a triangle in the middle of the screen.
- */
-static Vertex g_vertices[] = {
-    { {-0.35f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f} },
-    { { 0.35f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f} },
-    { { 0.0f,  0.5f,  0.0f}, {1.0f, 0.0f, 0.0f} },
-};
-
-/*
- * Indices data of the vertex buffer.
- */
-static unsigned int g_indices[] = { 0, 1, 2 };
-
-// indices count
-const unsigned int g_indices_cnt = _countof(g_indices);
-const unsigned int g_vertices_cnt = _countof(g_vertices);
 
 /*
  * This function helps locate the adapter with the largest dram.
@@ -412,7 +381,8 @@ bool create_geomtry_data() {
     constexpr size_t sizeofVertices = sizeofVertex * _countof(g_vertices);
     constexpr size_t sizeofIndex = sizeof(unsigned int);
     constexpr size_t sizeofIndices = sizeofIndex * _countof(g_indices);
-    constexpr size_t totalSize = sizeofVertices + sizeofIndices;
+    constexpr size_t totalSize1 = sizeofVertices + sizeofIndices;
+    constexpr size_t totalSize = g_total_vertices_size + g_total_indices_size;
 
     D3D12_RESOURCE_DESC buffer_desc = {};
     buffer_desc.Alignment = 0;
@@ -465,8 +435,8 @@ bool create_geomtry_data() {
     // copy the data to the uploading buffer
     UINT8* pRaw = 0;
     upload_buffer->Map(0, 0, reinterpret_cast<void**>(&pRaw));
-    memcpy(pRaw, g_vertices, sizeofVertices);
-    memcpy(pRaw + sizeofVertices, g_indices, sizeofIndices);
+    memcpy(pRaw, g_vertices, g_total_vertices_size);
+    memcpy(pRaw + g_total_vertices_size, g_indices, g_total_indices_size);
     upload_buffer->Unmap(0, 0);
 
     g_command_list_allocators[0]->Reset();
@@ -488,8 +458,8 @@ bool create_geomtry_data() {
     flush_command_queue();
 
     // create the vertex buffer and index buffer view
-    g_vertex_buffer_view = D3D12_VERTEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress(), sizeofVertices, sizeofVertex };
-    g_index_buffer_view = D3D12_INDEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress() + sizeofVertices, sizeofIndices, DXGI_FORMAT_R32_UINT };
+    g_vertex_buffer_view = D3D12_VERTEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress(), g_total_vertices_size, g_vertex_size};
+    g_index_buffer_view = D3D12_INDEX_BUFFER_VIEW{ g_geometry_buffer->GetGPUVirtualAddress() + g_total_vertices_size, g_total_indices_size, DXGI_FORMAT_R32_UINT };
 
     return true;
 }

@@ -67,8 +67,8 @@ add_executable(SingleTriangle ${all_files})
 target_link_libraries( SingleTriangle "d3d12.lib" "dxgi.lib" "dxguid.lib" "d3dcompiler.lib" "vulkan-1.lib")
 
 # setup correct output name for different configurations
-set_target_properties( SingleTriangle PROPERTIES RELEASE_OUTPUT_NAME "1_single_triangle_r" )
-set_target_properties( SingleTriangle PROPERTIES DEBUG_OUTPUT_NAME "1_single_triangle_d" )
+set_target_properties( SingleTriangle PROPERTIES RELEASE_OUTPUT_NAME "2_single_triangle_r" )
+set_target_properties( SingleTriangle PROPERTIES DEBUG_OUTPUT_NAME "2_single_triangle_d" )
 
 # setup working directory
 set_property(TARGET SingleTriangle PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$(Configuration)")
