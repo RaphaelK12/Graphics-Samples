@@ -16,17 +16,17 @@ struct float3 {
  * needed in vertex shader anymore.
  */
 struct Vertex {
-    float3 position;    // clip space position
-    float3 color;       // a color for each vertex
+    float3 position;            // clip space position
+    unsigned int color;         // a color for each vertex
 };
 
 /*
  * There are only three vertices, it is a triangle in the middle of the screen.
  */
 static Vertex g_vertices[] = {
-    { {-0.35f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f} },
-    { { 0.35f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f} },
-    { { 0.0f,  0.5f,  0.0f}, {1.0f, 0.0f, 0.0f} },
+    { {-0.35f, -0.5f, 0.0f}, 0xff0000 },
+    { { 0.35f, -0.5f, 0.0f}, 0x00ff00 },
+    { { 0.0f,  0.5f,  0.0f}, 0x0000ff },
 };
 
 /*

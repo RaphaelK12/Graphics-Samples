@@ -17,6 +17,6 @@ layout (location = 0) out vec4 outColor;
 // Vertex shader entry
 void main() {
     // simply pass through the vertex data
-    gl_Position = pos;
+    gl_Position = vec4(pos.x, -pos.y, pos.z, 1.0f);
     outColor = inColor;
 }

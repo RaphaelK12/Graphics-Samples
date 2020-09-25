@@ -617,11 +617,11 @@ static bool create_graphics_pipeline() {
 
     // vertex format layout
     vk::VertexInputAttributeDescription vertex_input_attr_descs[] = {
-        vk::VertexInputAttributeDescription().setOffset(0).setFormat(vk::Format::eR32G32B32A32Sfloat).setBinding(0).setLocation(0),
-        vk::VertexInputAttributeDescription().setOffset(16).setFormat(vk::Format::eR8G8B8A8Unorm).setBinding(0).setLocation(1)
+        vk::VertexInputAttributeDescription().setOffset(0).setFormat(vk::Format::eR32G32B32Sfloat).setBinding(0).setLocation(0),
+        vk::VertexInputAttributeDescription().setOffset(12).setFormat(vk::Format::eR8G8B8A8Unorm).setBinding(0).setLocation(1)
     };
     const auto vertex_input_binding_descs = std::array<vk::VertexInputBindingDescription, 1>({
-        vk::VertexInputBindingDescription().setBinding(0).setStride(20).setInputRate(vk::VertexInputRate::eVertex),
+        vk::VertexInputBindingDescription().setBinding(0).setStride(sizeof(Vertex)).setInputRate(vk::VertexInputRate::eVertex),
     });
     auto const vertex_input_layout = vk::PipelineVertexInputStateCreateInfo()
                                 .setVertexAttributeDescriptionCount(2)
@@ -893,13 +893,7 @@ void VulkanGraphicsSample::render_frame() {
         }
     }
 
-    // clear the back buffer
-    g_vk_graphics_cmd[g_frame_index].clearColorImage(g_vk_images[g_frame_index], vk::ImageLayout::eTransferDstOptimal,
-        vk::ClearColorValue(std::array<float, 4>({ {0.4f, 0.6f, 1.0f, 1.0f} })),
-        vk::ImageSubresourceRange(vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1));
-
     // issue the draw call
-    if(false)
     {
         vk::ClearValue values[] = { std::array<float, 4>({ {0.4f, 0.6f, 1.0f, 1.0f} }) };
 
@@ -936,11 +930,6 @@ void VulkanGraphicsSample::render_frame() {
         // Note that ending the renderpass changes the image's layout from
         // COLOR_ATTACHMENT_OPTIMAL to PRESENT_SRC_KHR
         g_vk_graphics_cmd[g_frame_index].endRenderPass();
-    }
-
-    // resource transition again
-    {
-        image_transition<vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::ePresentSrcKHR>(g_vk_graphics_cmd[g_frame_index], current_buffer, g_graphics_queue_family_index, g_graphics_queue_family_index);
     }
 
     // command list generation is done
